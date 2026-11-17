@@ -112,6 +112,7 @@ For Windows users, double-clickable `.bat` launchers are provided in the root fo
 
 | Launcher | Purpose |
 |---|---|
+| **`browse_master_db.bat`** | **master.db Browser**: Search characters (JP/EN), story episodes, titles, cross-ref IDs, and open SQLite GUI. |
 | **`5_integrated_workflow.bat`** | **Complete Pipeline**: Search character/story $\to$ check RedirectedResources $\to$ download $\to$ translate $\to$ gated repack $\to$ validate. |
 | **`4_dataminer.bat`** | **Data Miner & DB Explorer**: Offline manifest search, scope preview, sound/movie extraction, and database browser. |
 | **`3_xuat_repack.bat`** | **1-Click XUAT Repack**: Injects XUAT translation sheets into `input/*.unity3d` and writes to `output/`. |
@@ -221,6 +222,118 @@ priconne-adv-tools/
 ├── PROJECT_PLAN.md             # Development architecture & phasing
 ├── PROGRESS.md                 # Progress logs & test tracking
 └── DECISIONS.md                # Technical decisions & standards
+```
+
+---
+
+## Understanding Priconne IDs, Names & master.db (FAQ & Guide)
+
+If you are new to data mining or modding Princess Connect! Re:Dive, this guide explains how the game identifies characters, story cutscenes, titles, and how to browse `master.db`.
+
+### 1. What is `master.db`?
+`master.db` is an SQLite 3 database file downloaded by the game client. It contains all static game definitions across **998 tables**, including:
+- Character definitions, statistics, and rarity (`unit_data`)
+- Story chapters, episode titles, and unlock requirements (`story_detail`, `event_story_detail`)
+- Character voice lines and dialogues (`unit_comments`, `room_unit_comments`)
+- Skill formulas and descriptions (`skill_data`)
+- Quest stages and drop rates
+
+---
+
+### 2. Where do the IDs come from?
+All IDs are official numbers assigned by Cygames:
+
+#### **Unit ID (`unit_id`)** (6 digits)
+Identifies a specific character and costume/variant:
+- Pattern: `1 [Character ID 3-digits] [Variant ID 2-digits]`
+- Examples:
+  - `105801` = **Pecorine** (Base 1-star)
+  - `107501` = **Pecorine (Summer)**
+  - `111801` = **Pecorine (New Year)**
+  - `180401` = **Pecorine (Princess Form)**
+  - `100101` = **Hiyori** (Base 1-star)
+  - `180101` = **Hiyori (Princess Form)**
+
+#### **Story / ADV Script ID (`story_id`)** (7 digits)
+Identifies a specific story episode or cutscene script:
+- **Bond Stories**: `[Unit Base ID without variant] + [Episode # 3-digits]`
+  - `1001001` = Hiyori Episode 1
+  - `1001002` = Hiyori Episode 2
+  - `1058001` = Pecorine Episode 1
+- **Event & Main Story Cutscenes**: e.g. `9080155`
+  - In manifest: `a/storydata_9080155.unity3d`
+  - In project input: `input/9080155.unity3d`
+  - Extracted script: `text/9080155.txt`
+
+---
+
+### 3. Character Names: Japanese (JP) or English (EN)?
+In the official Japanese game, all text is originally Japanese, but Cygames also included English Romaji names internally:
+
+| Field | Language | Where It Is Stored | Example |
+|---|---|---|---|
+| `unit_name` | **English / Romaji** | `master.db` -> `unit_data` | `Pecorine`, `Hiyori`, `Pecorine (Summer)` |
+| `unit_name_jp` | **Japanese (Kanji/Kana)** | Generated from master.db / UI | `ペコリーヌ`, `ヒヨリ`, `ペコリーヌ（サマー）` |
+| `kana` | **Japanese (Hiragana)** | `master.db` -> `unit_data` | `ぺこりーぬ`, `ひより` |
+| `title` | **Japanese** | `master.db` -> `story_detail` | `ヒヨリ 第1話` (Hiyori Episode 1) |
+| `sub_title` | **Japanese** | `master.db` -> `story_detail` | `困った時はお互いさまさま` (In This Together) |
+| Dialogue | **Japanese** | `master.db` or `.unity3d` | `やばいですね☆` |
+| English Dialogue | **English** | `Translation/en/Text` | Community translations via XUAT / PriconneRe-TL |
+
+---
+
+### 4. How to Open and Browse `master.db`
+
+#### Method A: Using `browse_master_db.bat` (Easiest)
+Simply double-click `browse_master_db.bat` to launch the interactive browser menu:
+```text
+======================================================================
+           PRICONNE master.db BROWSER & EXPLORER
+======================================================================
+  1. Search Character / Unit (by EN name, JP name, or Unit ID)
+  2. Search Story Episodes   (by Story ID, Character name, or Subtitle)
+  3. Cross-Reference ID      (find all asset files linked to an ID)
+  4. List All Database Tables (view table names & row counts)
+  5. Open master.db in SQLite GUI (DB Browser for SQLite)
+  6. Launch Full Data Miner Menu (Manifests, Downloads & Extraction)
+  0. Exit
+```
+
+#### Method B: Free GUI App (DB Browser for SQLite)
+If you prefer a visual database viewer with spreadsheets, filters, and SQL querying:
+1. Install **DB Browser for SQLite**:
+   - Download: [sqlitebrowser.org/dl](https://sqlitebrowser.org/dl/)
+   - Or install via Windows Terminal: `winget install SQLiteBrowser.SQLiteBrowser`
+2. Open DB Browser &rarr; Click **Open Database** &rarr; Select `master.db` in this folder.
+3. Key tables to explore:
+   - `unit_data` — View all characters, internal English names, base stats, and voice actors.
+   - `story_detail` — View all episode titles, subtitles, and unlock conditions.
+   - `unit_comments` — View all homescreen tap dialogues.
+   - `room_unit_comments` — View all guildhouse furniture interactions.
+   - `skill_data` — View all skill descriptions, names, and formulas.
+
+#### Method C: Command-Line Interface (`4_dataminer.bat`)
+Run targeted searches directly from PowerShell or Command Prompt:
+
+```bash
+# 1. Search character by English Romaji name
+.\4_dataminer.bat --db-unit Pecorine
+
+# 2. Search character by Japanese name
+.\4_dataminer.bat --db-unit ペコリーヌ
+
+# 3. Search character by Unit ID
+.\4_dataminer.bat --db-unit 105801
+
+# 4. Search story episodes by Unit ID or title keyword
+.\4_dataminer.bat --db-story 1001
+.\4_dataminer.bat --db-story ヒヨリ
+
+# 5. Cross-reference an ID to all actual CDN assets (3D models, Spine 2D, Voices, Cutscenes)
+.\4_dataminer.bat --cross-ref 105801
+
+# 6. List all tables and row counts in master.db
+.\4_dataminer.bat --list-tables
 ```
 
 ---
