@@ -21,6 +21,8 @@ CMD_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 KANA_RE = re.compile(r"[\u3040-\u30ff]")
 WORD_RE = re.compile(r"[0-9A-Za-z\u3040-\u30ff\u4e00-\u9fff]")
 WS_RE = re.compile(r"\s+")
+ALL_WS_RE = re.compile(r"[\s\u3000\u200b\u00a0\ufeff]+")
+PLAYER_PLACEHOLDER_RE = re.compile(r"\{(?:player_?name|0)\}", re.IGNORECASE)
 JP_PUNCT = "。、！？「」『』（）・〜～…─゛゜"
 DASH_MAP = {c: "-" for c in "─—―–−‐‑"}
 BREAK_RE = re.compile(r"\r\n|[\r\n\v\f\x85\u2028\u2029]")
@@ -34,12 +36,15 @@ def game_to_xuat(s):
     if not s:
         return s
     s = s.replace(chr(92) + "n", "\n")
-    return BREAK_RE.sub("\n", s)
+    s = BREAK_RE.sub("\n", s)
+    return PLAYER_PLACEHOLDER_RE.sub("{playername}", s)
 
 
 def xuat_to_game(s, br):
     if not s:
         return s
+    # Convert player placeholder to game engine format {0}
+    s = PLAYER_PLACEHOLDER_RE.sub("{0}", s)
     if br in (chr(92) + "n", "\\n"):
         return BREAK_RE.sub(chr(92) + "n", s)
     return BREAK_RE.sub(br, s)
@@ -120,8 +125,9 @@ def norm1(s):
 
 
 def norm2(s):
-    s = unicodedata.normalize("NFKC", norm1(s)).translate(DASH_MAP)
-    return re.sub(r"-{2,}", "-", WS_RE.sub("", s)).casefold()
+    s = norm1(s)
+    s = unicodedata.normalize("NFKC", s).translate(DASH_MAP)
+    return re.sub(r"-{2,}", "-", ALL_WS_RE.sub("", s)).casefold()
 
 
 def looks_japanese(s):
@@ -327,7 +333,7 @@ def detect_break_char(recs, default="\n"):
 
 
 def box_key(box, policy="always"):
-    t = box.text
+    t = game_to_xuat(box.text)
     if not t.strip():
         return t
     if policy == "always":
@@ -525,6 +531,9 @@ class Store:
         e = Entry(key, val, src, line)
         norm_k = key.rstrip("\n")
         self.candidates.setdefault(norm_k, []).append(e)
+        norm_tight = norm2(key)
+        if norm_tight != norm_k:
+            self.candidates.setdefault(norm_tight, []).append(e)
 
         old = self.exact.get(key)
         if old is not None:
@@ -583,6 +592,8 @@ class Store:
     def lookup_resolved(self, text, allow_fuzzy=True, actors=None, interactive=True, context=""):
         norm_k = game_to_xuat(text).rstrip("\n")
         cands = self.candidates.get(norm_k, [])
+        if not cands:
+            cands = self.candidates.get(norm2(text), [])
         seen_vals = {}
         unique_cands = []
         for c in cands:

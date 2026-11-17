@@ -3,7 +3,7 @@
 [![Python 3.11 - 3.14](https://img.shields.io/badge/Python-3.11%20|%203.12%20|%203.13%20|%203.14-blue.svg)](https://www.python.org/)
 [![UnityPy](https://img.shields.io/badge/UnityPy-%3E%3D1.20-orange.svg)](https://github.com/K0lb3/UnityPy)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests: 25 Passed](https://img.shields.io/badge/Tests-100%25%20Passed-brightgreen.svg)](tests/)
+[![Tests: 32 Passed](https://img.shields.io/badge/Tests-100%25%20Passed-brightgreen.svg)](tests/)
 
 A universal asset modification, data mining, and translation injection toolchain for **Princess Connect! Re:Dive (プリンセスコネクト！Re:Dive)** Japanese PC/DMM client, integrated with **BepInEx** and **XUnity Auto Translator (XUAT)**.
 
@@ -43,6 +43,8 @@ A universal asset modification, data mining, and translation injection toolchain
 
 - **Lossless AST Story Parser & Gated Repacking**:
   - Full round-trip byte-exact serializer (`advscript.py`, `advverify.py`).
+  - **XUnity Whitespace-Insensitive Matching**: Replicates XUnity's `IgnoreWhitespaceInDialogue=True` feature, matching lines across newlines (`\n`), ASCII spaces, full-width ideographic spaces (`\u3000`), or collapsed whitespace.
+  - **Player Name Placeholder Translation**: Seamlessly reconciles community XUAT `{playername}` placeholders with internal Unity engine `{0}` tokens. Injects `{0}` into repacked bundles so the game's C# formatting properly renders the player's name in-game.
   - **Repack Gating**: Only repacks into `.unity3d` if 100% of real dialogue lines are translated.
   - Generates line-by-line `.missing.txt` gap reports for incomplete scripts.
   - Prompts safe cleanup of translated lines from XUAT sheets with automatic backups.
@@ -362,7 +364,7 @@ Expected output:
 ======================================================================
   PRINCESS CONNECT! RE:DIVE - FULL TEST SUITE VERIFICATION
 ======================================================================
-Ran 25 tests in 3.415s
+Ran 32 tests in 7.111s
 
 OK
 ======================================================================

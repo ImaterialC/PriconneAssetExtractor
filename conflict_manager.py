@@ -34,7 +34,15 @@ def unesc(s):
     return "".join(out)
 def esc(s):
     return s.replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
-def norm_key(s): return unesc(s).replace("\r\n", "\n").strip()
+
+PLAYER_PLACEHOLDER_RE = re.compile(r"\{(?:player_?name|0)\}", re.IGNORECASE)
+ALL_WS_RE = re.compile(r"[\s\u3000\u200b\u00a0\ufeff]+")
+
+def norm_key(s):
+    s = unesc(s).replace("\r\n", "\n")
+    s = PLAYER_PLACEHOLDER_RE.sub("{playername}", s)
+    return ALL_WS_RE.sub("", s)
+
 def letters(i): return "ABCDEFGH"[i] if i < 8 else str(i)
 
 def load_lines(path):
