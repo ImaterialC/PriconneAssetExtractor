@@ -3,7 +3,7 @@
 [![Python 3.11 - 3.14](https://img.shields.io/badge/Python-3.11%20|%203.12%20|%203.13%20|%203.14-blue.svg)](https://www.python.org/)
 [![UnityPy](https://img.shields.io/badge/UnityPy-%3E%3D1.20-orange.svg)](https://github.com/K0lb3/UnityPy)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests: 32 Passed](https://img.shields.io/badge/Tests-100%25%20Passed-brightgreen.svg)](tests/)
+[![Tests: 37 Passed](https://img.shields.io/badge/Tests-100%25%20Passed-brightgreen.svg)](tests/)
 
 A universal asset modification, data mining, and translation injection toolchain for **Princess Connect! Re:Dive (プリンセスコネクト！Re:Dive)** Japanese PC/DMM client, integrated with **BepInEx** and **XUnity Auto Translator (XUAT)**.
 
@@ -52,6 +52,13 @@ A universal asset modification, data mining, and translation injection toolchain
 - **Interactive Conflict Manager GUI**:
   - Dedicated GUI (`conflict_manager.py`) to resolve duplicate translation line conflicts across projects.
 
+- **Misora: Unity3D Revision Tool & Story Editor (`misora/`)**:
+  - Dedicated GUI editor for instant, zero-pipeline revision and in-place repacking of packed `.unity3d` story bundles in <100ms.
+  - **Dual-View Interface**: Game Display View (clean dialogue uninterrupted by cues) and Raw AST Script View (command records).
+  - **Notepad++ Style Multi-Scope Search**: Search within files, directories, or whole projects with Regex, Case-matching, and XUnity whitespace/`{playername}` normalization.
+  - **Bi-directional XUAT Sync**: Updates matching `.txt` dictionaries with automated `.bak` backups on save.
+  - Double-click `misora.bat` to launch. Self-contained in `misora/` for independent repository deployment.
+
 ---
 
 ## Architecture & Workflow
@@ -89,8 +96,8 @@ flowchart TD
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/your-username/priconne-adv-tools.git
-cd priconne-adv-tools
+git clone https://github.com/ImaterialC/PriconneAssetExtractor.git
+cd PriconneAssetExtractor
 ```
 
 ### 2. Install Python Dependencies

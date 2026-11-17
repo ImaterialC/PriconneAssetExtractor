@@ -24,6 +24,10 @@ def main():
     tests_dir = Path(__file__).resolve().parent
     suite.addTests(loader.discover(start_dir=str(tests_dir), pattern="test_*.py", top_level_dir=str(tests_dir)))
 
+    misora_tests = PROJECT_ROOT / "misora" / "tests"
+    if misora_tests.exists():
+        suite.addTests(loader.discover(start_dir=str(misora_tests), pattern="test_*.py", top_level_dir=str(PROJECT_ROOT)))
+
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
 
