@@ -22,7 +22,8 @@ try:
         game_to_xuat, xuat_to_game, norm_search,
         load_bundle_story, save_bundle_story,
         ProjectSearchEngine, SearchOptions,
-        XUnitySyncManager
+        XUnitySyncManager,
+        MasterUndoJournal, UndoOperation, BoxEditDelta, PlainTextDelta, BulkFileDelta,
     )
 except ImportError:
     from core import (
@@ -30,7 +31,8 @@ except ImportError:
         game_to_xuat, xuat_to_game, norm_search,
         load_bundle_story, save_bundle_story,
         ProjectSearchEngine, SearchOptions,
-        XUnitySyncManager
+        XUnitySyncManager,
+        MasterUndoJournal, UndoOperation, BoxEditDelta, PlainTextDelta, BulkFileDelta,
     )
 
 
@@ -93,6 +95,10 @@ class TestMisoraCore(unittest.TestCase):
         )
         results = engine.search_file(sample_txt, opts)
         self.assertEqual(len(results), 1)
+        res = results[0]
+        self.assertGreaterEqual(res.snippet_start, 0)
+        self.assertGreater(res.snippet_end, res.snippet_start)
+        self.assertIn("あけましておめでとう", res.match_snippet)
 
         # Regex search
         opts_rx = SearchOptions(
@@ -103,6 +109,9 @@ class TestMisoraCore(unittest.TestCase):
         )
         results_rx = engine.search_file(sample_txt, opts_rx)
         self.assertEqual(len(results_rx), 1)
+        res_rx = results_rx[0]
+        self.assertGreaterEqual(res_rx.snippet_start, 0)
+        self.assertGreater(res_rx.snippet_end, res_rx.snippet_start)
 
     def test_05_xunity_sync_update(self):
         dict_file = self.tmp_dir / "Events.txt"
@@ -125,6 +134,34 @@ class TestMisoraCore(unittest.TestCase):
         updated_content = dict_file.read_text(encoding="utf-8")
         self.assertIn("Fixed Translation", updated_content)
         self.assertNotIn("Old Translation With Typo", updated_content)
+
+    def test_06_undo_journal_coalescing(self):
+        """MasterUndoJournal coalesces consecutive BoxEditDelta for same box."""
+        journal = MasterUndoJournal()
+        d1 = BoxEditDelta(box_index=0, old_speaker="A", new_speaker="A", old_text="old", new_text="v1", file_path="f.unity3d")
+        d2 = BoxEditDelta(box_index=0, old_speaker="A", new_speaker="A", old_text="old", new_text="v2", file_path="f.unity3d")
+        journal.record(d1, "Edit box #0")
+        journal.record(d2, "Edit box #0")
+        # Should coalesce -> still 1 op
+        self.assertEqual(journal.undo_depth, 1)
+        op = journal.pop_undo()
+        self.assertIsNotNone(op)
+        self.assertEqual(op.deltas[0].new_text, "v2")
+        # After undo, redo stack should have 1 entry
+        self.assertEqual(journal.redo_depth, 1)
+
+    def test_07_undo_journal_batch(self):
+        """MasterUndoJournal batch groups multiple deltas into one op."""
+        journal = MasterUndoJournal()
+        journal.begin_batch("Replace All")
+        for i in range(3):
+            journal.record(BoxEditDelta(box_index=i, old_speaker="X", new_speaker="X", old_text="old", new_text="new", file_path="f.unity3d"))
+        journal.end_batch()
+        self.assertEqual(journal.undo_depth, 1)
+        op = journal.pop_undo()
+        self.assertIsNotNone(op)
+        self.assertEqual(len(op.deltas), 3)
+        self.assertEqual(op.label, "Replace All")
 
 
 if __name__ == "__main__":

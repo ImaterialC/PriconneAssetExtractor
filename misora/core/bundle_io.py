@@ -7,6 +7,8 @@ Self-contained module utilizing UnityPy for zero-temporary-file in-place asset m
 from __future__ import annotations
 
 import os
+import shutil
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -80,7 +82,8 @@ def save_bundle_story(
     env: Any,
     text_asset_obj: Any,
     doc: StoryDocument,
-    out_path: Union[str, Path]
+    out_path: Union[str, Path],
+    backup_dir: Optional[Path] = None,
 ) -> int:
     """
     Repack the modified StoryDocument back into the Unity3D bundle file in-place.
@@ -88,6 +91,13 @@ def save_bundle_story(
     """
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if backup_dir is not None and out_path.is_file():
+        backup_dir = Path(backup_dir)
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        bak_path = backup_dir / f"{out_path.stem}.bak_{ts}{out_path.suffix}"
+        shutil.copy2(out_path, bak_path)
 
     new_data = doc.to_binary()
     d = text_asset_obj.read()

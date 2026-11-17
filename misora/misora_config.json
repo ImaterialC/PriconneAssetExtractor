@@ -1,0 +1,22 @@
+{
+  "theme_version": 2,
+  "dialogue_font_family": "Segoe UI",
+  "dialogue_font_size": 11,
+  "raw_font_size": 9,
+  "ui_font_size": 9,
+  "theme": {
+    "bg_dark": "#14141a",
+    "bg_panel": "#1e1e26",
+    "bg_editor": "#181820",
+    "border": "#30303e",
+    "fg_text": "#f0f0f5",
+    "fg_muted": "#9898a8",
+    "misora_pink": "#ff7da7",
+    "misora_pink_hover": "#ff99ba",
+    "misora_pink_active": "#e05a87",
+    "accent_blue": "#68b5f3",
+    "accent_green": "#6ad18a",
+    "accent_yellow": "#f5c26b",
+    "highlight_bg": "#382433"
+  }
+}

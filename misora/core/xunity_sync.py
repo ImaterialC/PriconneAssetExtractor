@@ -41,7 +41,8 @@ class XUnitySyncManager:
         japanese_key: str,
         new_english_text: str,
         search_roots: List[Path],
-        backup: bool = True
+        backup: bool = True,
+        backup_dir: Optional[Path] = None,
     ) -> List[SyncMatch]:
         """
         Search for matching translation entries across search_roots and update them in-place.
@@ -90,7 +91,13 @@ class XUnitySyncManager:
 
                 if file_modified:
                     if backup:
-                        bak_path = tf.with_suffix(f".bak_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+                        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        if backup_dir is not None:
+                            bd = Path(backup_dir)
+                            bd.mkdir(parents=True, exist_ok=True)
+                            bak_path = bd / f"{tf.stem}.bak_{ts}{tf.suffix}"
+                        else:
+                            bak_path = tf.with_suffix(f".bak_{ts}")
                         shutil.copy2(tf, bak_path)
                     tf.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
 
