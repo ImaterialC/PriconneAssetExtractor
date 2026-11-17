@@ -1,0 +1,6 @@
+# Princess Connect! Re:Dive Translation & Asset Toolkit (Priconne ADV Tools)
+# Python 3.11 - 3.14 recommended (UnityPy requires precompiled lz4 wheels)
+
+UnityPy>=1.20.0
+requests>=2.28.0
+pycryptodome>=3.18.0

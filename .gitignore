@@ -1,0 +1,58 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+
+# Operating system artifacts
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor & IDE configs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Large Game Database binaries (Auto-downloaded on setup via: py -m NewDataMiner.cli --update-db)
+master.db
+master.db-shm
+master.db-wal
+master.db.bak
+master.db.downloading
+master.db.tmp
+corrupt_test.db
+
+# User workspace input, text and output bundles (Keep folders, ignore user payloads)
+input/*
+!input/.gitkeep
+!input/9080155.unity3d
+output/*
+!output/.gitkeep
+text/*
+!text/.gitkeep
+downloads/
+extracted/
+exports/
+test_exports/
+
+# Diagnostic logs and reports
+*.log
+*.missing.txt
+*.report.txt
+*.probe.txt
+*.keys.txt
+
+# Local UI sessions and state caches
+conflict_ui_session.json
+conflict_ui_state.json
+conflict_resolutions.json
+priconne_tool_settings.json
+
+# Archive / Backup folders
+_archive/
+priconne_backup_archive/
+
+# Third-party binary toolkit (too large for git; download separately)
+usmtoolkit/

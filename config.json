@@ -1,0 +1,5 @@
+{
+  "break_char": "\r",
+  "filler": " ",
+  "trailing_nl": "always"
+}
