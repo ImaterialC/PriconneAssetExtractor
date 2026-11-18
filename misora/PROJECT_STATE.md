@@ -227,27 +227,18 @@ Bug #6: Buttons use `width=10` fixed. Spec says max = natural width of "Sub"/"Su
 
 ---
 
-## KNOWN BUG STATUS
+## KNOWN BUG STATUS (COMPREHENSIVE AUDIT)
 
-| # | Bug | Status |
-|---|-----|--------|
-| 1 | DnD crashes (ctypes WM_DROPFILES) | FIXED & VERIFIED by user: Multi-file works; needs folder multi-file prompt & non-text format guard |
-| 2 | Config persists only fonts/theme | PARTIAL — paths persist; some toggles missing (geometry, Continuous/Preview, sync-XUAT) |
-| 3 | Undo/Redo absent; Ctrl+Z/Y blocked | DONE — Ctrl+Z (undo) and Ctrl+Y / Ctrl+Shift+Z (redo) unblocked in Continuous key guard |
-| 4 | Theme misses some windows | UNVERIFIED — needs live test |
-| 5 | Button labels unreadable on accents | DONE — wcag_relative_luminance + best_contrast_fg implemented |
-| 6 | Ribbon buttons too wide | PARTIAL — all width=10; spec wants variable widths |
-| 7 | Pin icon only on Search Results | UNVERIFIED — needs live check |
-| 8 | Embedded Debug console | DONE — console removed; F12 shows toast |
-| 9 | Continuous→Page lands wrong box | UNVERIFIED — needs live test |
-| 10 | Up arrow doesn't cross to prev box | DONE in code — lines 4867-4879 + 5291-5298 |
-| 11 | Delete blocked on multi-box selection | PARTIAL — on_clear_dialogue_skeleton exists; spec details unverified |
-| 12 | Eyedropper & Color window broken | DONE — Pillow render + StringVar master fix + 420x340 geometry (user verified working) |
-| 13 | NGUI_TOKEN_RE corrupted | NOT PRESENT — compiles clean |
-| 14 | Gradient separator comma vs hyphen | DECIDED: Ribbon inserts comma `[RRGGBB,RRGGBB]`; parser accepts both `[-,]` |
-| 15 | Plain .txt save "Nothing to Save" | LIKELY FIXED — code path exists; needs live test |
-| 16 | RRGGBBAA crashes preview; \n not rendered | UNVERIFIED |
-| 17 | Stale dark misora_config.json override | NOT PRESENT — current config is Purple & White |
+| # | Bug / Issue Area | Real User Status | Technical Cause & Fix Plan |
+|---|---|---|---|
+| **B1** | **Open Folder from Menu (`File -> Open Folder...`)** | **BROKEN** | Unlike folder DnD, menu open only opens 1st file or sets search scope without the *Yes (open all) / No (scope only) / Cancel* prompt or batch safety checks. Unify menu open with the DnD folder workflow. |
+| **B2** | **"Show Line Numbers" (Vertical)** | **BROKEN** | Toggling checkbox runs `pack_forget()` then `pack(side="left")` without `before=`, causing the gutter to pack after/behind the text editor or fail to re-anchor. Must pack `before=txt_dialogue` in Page view and `before=txt_continuous` in Continuous view. |
+| **B3** | **"Show Column Ruler" / Horizontal character count** | **BROKEN** | Column ruler text widget repacks at bottom or disappears because `pack(side="top")` lacks `before=clean_editor_row`. Must pack `before=clean_editor_row`. |
+| **B4** | **Continuous View instability & cursor loss** | **BROKEN** | Inline edits and undo wipe the entire continuous widget (`delete("1.0", tk.END)`), re-rendering all boxes from scratch instead of applying local span updates. Multi-box selection deletion returns `"break"` without feedback. |
+| **B5** | **Custom Themes non-functional & reverting** | **BROKEN** | Side drawer custom color swatch buttons and hex entries are never updated during theme refreshes. On `<FocusOut>`, `_commit_theme_hex()` triggers with stale initial values, immediately overwriting and reverting custom color selections. |
+| **B6** | **Undo and Redo not working in editor** | **BROKEN** | `txt_dialogue` has native `undo=True` enabled, executing Tkinter's internal un-tracked undo buffer instead of `MasterUndoJournal`, desyncing the editor widget from `StoryDocument`. Must disable native widget undo (`undo=False`) and route Ctrl+Z / Ctrl+Y strictly through `MasterUndoJournal`. |
+| **B7** | **Ribbon button widths too wide** | **PARTIAL** | Hardcoded `width=10` on `Color`, `Grad`, `Ruby`, `[-]`, and `{player}` creates oversized buttons (especially `[-]`). Remove fixed width and use natural text width with padding. |
+| **B8** | **Plain `.txt` save verification & backups** | **NEEDS TEST** | Ensure editing raw `.txt` files properly tracks dirty state, creates timestamped backups in the backup directory, and repacks without error. |
 
 ---
 
@@ -255,85 +246,51 @@ Bug #6: Buttons use `width=10` fixed. Spec says max = natural width of "Sub"/"Su
 
 | Decision | Detail |
 |----------|--------|
-| Theme default | Misora Purple & White confirmed in THEME_PRESETS and misora_config.json |
-| Gradient separator in regex | Both `[-,]` accepted in NGUI_TAG_RE and NGUI_TOKEN_RE |
-| Gradient ribbon insert | Ribbon inserts comma format `[RRGGBB,RRGGBB]` per Section 4-D and user agreement |
-| Eyedropper & Color Map | Pillow `ImageTk.PhotoImage` + `ImageGrab` approved & installed |
-| DnD approach | Existing ctypes hook works for multi-file; add folder scan prompt + binary filter |
-| Test suite | 11 tests (11/11 pass); 3 more tests from brief DoD not yet written |
+| Folder Open Consistency | `File -> Open Folder...` and drag-and-drop folder drop must use the exact same prompt (*Yes / No / Cancel*) and batch thresholds. |
+| Master Undo Journal | Tkinter native widget undo (`undo=True`) must be disabled (`undo=False`) so `MasterUndoJournal` is the single source of truth for all undo/redo operations across AST and UI. |
+| Theme State Synchronization | Theme changes must dynamically update all swatch button colors and `StringVar` hex entries in the Customize drawer, preventing focus-out reverts. |
+| Ruler & Gutter Packing | Line numbers gutter and horizontal column ruler must use explicit `before=` anchoring so toggling preserves layout hierarchy without displacing the editor. |
+| NGUI Gradient Format | Ribbon inserts comma format `[RRGGBB,RRGGBB]`; parser accepts both `[-,]`. |
 
 ---
 
-## PRIORITIZED TODO (checkboxes)
+## PHASED ROADMAP & PRIORITIZED ACTION PLAN
 
-### P0 — Stability (FIRST, before anything else)
+### Phase 1: Core GUI Bug Fixes (Fix What Is Broken First)
+- [ ] **1.1 Unify Menu "Open Folder" with DnD Flow**  
+  Update `on_open_folder()` to detect story files, prompt (*Yes: Open all into tabs / No: Set search scope only / Cancel: Abort*), and enforce batch safety limits.
+- [ ] **1.2 Fix Vertical Line Numbers & Horizontal Column Ruler Toggles**  
+  Fix packing order with `before=` anchors for `gutter_clean`, `ruler_clean`, `gutter_cont`, and `ruler_cont`.
+- [ ] **1.3 Fix Custom Theme Color Picker & Persistence**  
+  Update `_apply_theme_and_fonts_live()` to synchronize `_theme_swatch_buttons` and `_theme_hex_vars`; prevent stale focus-out overwrites in `_commit_theme_hex()`.
+- [ ] **1.4 Fix Undo / Redo in Dialogue & Continuous Editors**  
+  Set `undo=False` on `txt_dialogue`; route `<Control-z>` and `<Control-y>` directly through `on_undo()` and `on_redo()`. Update `_apply_delta()` to update the active box in-place rather than wiping the entire document.
+- [ ] **1.5 Fix Ribbon Button Widths**  
+  Remove hardcoded `width=10` from ribbon buttons (`[-]`, `{player}`, `Color`, `Grad`, `Ruby`), replacing with natural label width and `padx=2`.
 
-- [ ] **P0-1** Fix Ctrl+Z/Y blocked in Continuous key guard  
-  File: `misora.py` line 4901-4902  
-  Change: `if ctrl and keysym.lower() in {"z", "y"}: return "break"` → pass through or call on_undo/on_redo  
-  Risk: LOW — single line, well-understood
+### Phase 2: Workflow & Editor Usability
+- [ ] **2.1 Right-Click Context Menu for "Opened Files" Dock**  
+  Add context menu: *Close*, *Close Others*, *Close All*, *Save (Ctrl+S)*, *Reveal in Explorer*, *Copy Full Path*.
+- [ ] **2.2 Seamless Cursor & Box Sync between Continuous View & Page View**  
+  Smoothly transition active box and cursor offset when toggling between Continuous View and single-box Page View.
+- [ ] **2.3 Plain `.txt` Save Verification & Automated Backups**  
+  Verify and add unit tests for opening, editing, dirty-tracking, timestamped backups, and saving plain `.txt` translation dictionaries.
 
-- [ ] **P0-2** Verify .txt save works (live test with a .txt file)  
-  If broken: check `is_bundle_file` initialization for .txt files
-
-- [ ] **P0-3** Verify DnD does not crash (live drag-drop test)  
-  If crashes: **PROPOSE** tkinterdnd2 swap to user, await approval
-
-- [ ] **P0-4** Complete config persistence: add missing fields  
-  Missing: window geometry, Continuous/Preview toggle, sync-XUAT checkbox, sash positions  
-  Low risk; straightforward serialization additions
-
-- [ ] **P0-5** Verify unit tests still pass after each P0 step
-
-### P1 — UI Correctness
-
-- [ ] **P1-1** Verify Ctrl+Z/Y undo works correctly after P0-1 fix
-- [ ] **P1-2** Verify theme coverage — Toplevels + dialogs open during re-theme  
-  If broken: audit `_apply_theme_to_all` to ensure all Toplevels registered
-- [ ] **P1-3** Ribbon widths — verify natural width spec vs current width=10  
-  If wrong: change to width-less buttons with padx instead
-- [ ] **P1-4** Pin icon: audit all dockable panels; add pin/unpin if missing
-- [ ] **P1-5** Continuous↔Page toggle box sync — live test  
-  If broken: fix `_on_toggle_view` to preserve current_box_idx
-- [ ] **P1-6** Up arrow — live test both Page and Continuous views
-- [ ] **P1-7** Multi-box Delete — verify confirm dialog + skeleton preserved + undo
-- [ ] **P1-8** Eyedropper — live test at 100% DPI; if DPI scaling broken, **PROPOSE** Pillow ImageGrab
-- [ ] **P1-9** Ask user: which gradient separator does real corpus use (comma or hyphen)?
-- [ ] **P1-10** RRGGBBAA in preview — test + fix truncation; literal \n as line break in preview
-
-### P2 — Workflow
-
-- [ ] **P2-1** Replace dialog — verify present and working
-- [ ] **P2-2** Right-click context menus — Opened Files panel
-- [ ] **P2-3** "Open Containing Folder" action
-- [ ] **P2-4** NGUI Glossary location — verify it's a top-level MENU (not side drawer button)
-- [ ] **P2-5** Toasts toggle in settings — verify persisted
-- [ ] **P2-6** Datamine confirmation dialog details
-- [ ] **P2-7** Verify "Open Files" scope searches in-memory docs
-
-### P3 — Deferred
-
-- Translator window and AI Prompt Builder: largely done per code audit; edge cases last
-- Token/API providers: explicitly deferred by user
-
-### NEW TESTS (from Definition of Done)
-
-- [ ] Empty-body codec round-trip test
-- [ ] Clipboard marker round-trip test  
-- [ ] Undo batch integrity test
-
----
-
-## ASK-FIRST ITEMS (pending user response)
-
-1. **Gradient separator in real XUAT dictionaries**: Do your `.txt` files use `[RRGGBB,RRGGBB]` (comma) or `[RRGGBB-RRGGBB]` (hyphen)? This determines what the ribbon inserts.
-2. **DnD swap proposal**: If Bug #1 is confirmed crashing, approve `tkinterdnd2` replacement?
-3. **Eyedropper Pillow swap proposal**: If Bug #12 fails at 125%/150% DPI, approve `Pillow` ImageGrab?
+### Phase 3: Machine Translation (MTL) & AI Prompt Integration
+- [ ] **3.1 MTL Engines & Connectivity**  
+  DeepL Free/Pro API integration, local/Sugoi HTTP translation server support, and connection verification testing.
+- [ ] **3.2 Tag Masking & Entity Shielding**  
+  Strict protection of `{playername}`, NGUI color/gradient/bold tags, and Ruby markup during translation passes.
+- [ ] **3.3 AI / LLM Prompt Header Exporter & Customizer**  
+  Customizable translation rules, character context, speaker metadata formatting, and 1-click clipboard export for LLMs.
+- [ ] **3.4 Dedicated Floating Translation Assistant Workspace**  
+  Side-by-side Japanese original vs. translated drafts, comparison cards, and 1-click application to the active dialogue box.
+- [ ] **3.5 Batch Story Translation Sweep**  
+  Automated translation of untranslated boxes in a story with progress reporting and cancellation support.
 
 ---
 
 ## WORK STYLE NOTES
-
-- Git is available (`main` branch, clean except `misora_config.json` modified + 2 untracked .bak files).
-- **Before each step**: `git add -A && git commit -m "snapshot: before <step>"` for easy revert.
-- **After each step**: compile + test, update this file, report briefly, WAIT for "go".
+- Before each step: verify clean compile (`py -3.12 -m py_compile misora.py`).
+- Run all unit tests (`py -3.12 -m unittest discover -s tests`).
+- Document all resolutions in this file and present concise status reports to the user.
