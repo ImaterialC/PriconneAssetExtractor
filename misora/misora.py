@@ -416,13 +416,14 @@ class NguiColorPickerPopup(tk.Toplevel):
         self._sync_ui_from_hsv()
 
         self.update_idletasks()
-        req_w = max(390, self.winfo_reqwidth())
-        req_h = max(310, self.winfo_reqheight())
+        req_w = max(400, self.winfo_reqwidth())
+        req_h = max(320, self.winfo_reqheight())
         px = parent.winfo_rootx() + (parent.winfo_width() // 2) - (req_w // 2)
         py = parent.winfo_rooty() + (parent.winfo_height() // 2) - (req_h // 2)
         self.geometry(f"{req_w}x{req_h}+{max(20, px)}+{max(20, py)}")
         self.minsize(req_w, req_h)
         self.resizable(False, False)
+        logger.info("UI / Theme / Config", "NguiColorPickerPopup initialized (%sx%s)", req_w, req_h)
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.bind("<Escape>", self._on_escape)
@@ -665,6 +666,7 @@ class NguiColorPickerPopup(tk.Toplevel):
             rows.append("{" + " ".join([hx] * w) + "}")
         img.put(" ".join(rows))
         self._hue_photo = img
+        self.canvas_hue.image = img
         self.canvas_hue.delete("all")
         self.canvas_hue.create_image(0, 0, anchor="nw", image=img)
 
@@ -702,6 +704,7 @@ class NguiColorPickerPopup(tk.Toplevel):
                 rows.append("{" + " ".join(row_colors) + "}")
             img.put(" ".join(rows))
         self._sv_photo = img
+        self.canvas_sv.image = img
         self.canvas_sv.delete("all")
         self.canvas_sv.create_image(0, 0, anchor="nw", image=img)
 
@@ -739,6 +742,7 @@ class NguiColorPickerPopup(tk.Toplevel):
                 rows.append("{" + " ".join([hx] * w) + "}")
             img.put(" ".join(rows))
         self._grad_photo = img
+        self.canvas_grad_preview.image = img
         self.canvas_grad_preview.delete("all")
         self.canvas_grad_preview.create_image(0, 0, anchor="nw", image=img)
 
@@ -3523,6 +3527,12 @@ class MisoraApp(tk.Tk):
         self.apply_ngui_wrapper(f"[{c0},{c1}]", "[-]")
 
     def on_open_color_picker(self) -> None:
+        logger.info(
+            "UI / Theme / Config",
+            "Opening NGUI Color & Gradient Picker (primary=%s, secondary=%s)",
+            self._active_ngui_color,
+            self._active_ngui_grad_end,
+        )
         if self._color_picker_win is not None and self._color_picker_win.winfo_exists():
             self._color_picker_win.lift()
             self._color_picker_win.focus_set()
