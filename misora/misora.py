@@ -1681,36 +1681,77 @@ class MisoraApp(tk.Tk):
             pass
 
     def _handle_dropped_paths(self, paths: List[Path]) -> None:
-        """Process files or folders dropped onto the Misora window safely."""
+        """Process files or folders dropped onto the Misora window safely.
+
+        Bug 1 fix: Open ALL dropped files with supported extensions (not just first).
+        Bug 2 fix: When a folder is dropped, scan it for story files and open the first.
+        Bug 3 fix: Reset _dnd_in_progress at start to handle previous crash recovery.
+        """
+        self._dnd_in_progress = False  # reset early so crashes don't lock DnD
         try:
             if not paths:
                 return
             self.logger.info("Drag & Drop", f"Received {len(paths)} dropped item(s): {[str(p) for p in paths]}")
 
+            preferred_exts = {".unity3d", ".asset", ".txt", ".json", ".csv", ".tsv"}
             files = [p for p in paths if p.is_file()]
             dirs = [p for p in paths if p.is_dir()]
 
+            opened = 0
+            skipped = 0
+
             if files:
-                preferred_exts = {".unity3d", ".asset", ".txt", ".json", ".csv", ".tsv"}
-                target_file = next((f for f in files if f.suffix.lower() in preferred_exts), files[0])
-                self.open_file(target_file)
-                extra = len(paths) - 1
-                if extra > 0:
-                    self.lbl_status.config(
-                        text=self.lbl_status.cget("text") + f" | (+{extra} additional item(s) ignored)"
-                    )
+                # Open every supported file — not just the first
+                for f in files:
+                    if f.suffix.lower() in preferred_exts:
+                        try:
+                            self.open_file(f)
+                            opened += 1
+                        except Exception as exc:  # noqa: BLE001
+                            self.logger.error("Drag & Drop", f"Could not open {f.name}: {exc}")
+                            skipped += 1
+                    else:
+                        skipped += 1
+                if opened == 0 and files:
+                    # Fall back to first file even if unsupported extension
+                    try:
+                        self.open_file(files[0])
+                        opened += 1
+                    except Exception as exc:  # noqa: BLE001
+                        self.logger.error("Drag & Drop", f"Could not open {files[0].name}: {exc}")
+                msg = f"Opened {opened} file(s) via drag & drop."
+                if skipped:
+                    msg += f" ({skipped} skipped / unsupported)"
+                self.lbl_status.config(text=msg)
+
             elif dirs:
+                # Bug 2: scan dropped folder for story files and open first found
                 folder = dirs[0].resolve()
                 self.selected_search_folder = folder
                 self.scope_var.set("folder")
-                self.lbl_status.config(
-                    text=f"Selected folder for search: {folder} (Press 'Find in Files' to search)"
+                story_files = (
+                    sorted(folder.glob("*.unity3d")) +
+                    sorted(folder.glob("*.asset")) +
+                    sorted(folder.glob("*.txt"))
                 )
+                if story_files:
+                    try:
+                        self.open_file(story_files[0])
+                        self.lbl_status.config(
+                            text=f"Opened \"{story_files[0].name}\" from folder ({len(story_files)} story file(s) found). Search scope set to this folder."
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        self.logger.error("Drag & Drop", f"Could not open folder file {story_files[0].name}: {exc}")
+                        self.lbl_status.config(
+                            text=f"Folder set for search: {folder} ({len(story_files)} file(s) found, could not open first)"
+                        )
+                else:
+                    self.lbl_status.config(
+                        text=f"Folder set for search: {folder} (no .unity3d/.asset/.txt files found)"
+                    )
         except Exception as exc:
             self.logger.exception("Error while handling dropped path(s):", exc)
             messagebox.showerror("Drag & Drop Error", f"Failed to open dropped item:\n{exc}")
-        finally:
-            self._dnd_in_progress = False
 
     # -------------------------------------------------------------------------
     # Environment & WCAG Contrast-Safe ttk Styling (#13, #4, #7)
@@ -2312,7 +2353,9 @@ class MisoraApp(tk.Tk):
             "panel_box"
         )
         self.search_frame.pack(fill="x", padx=8, pady=(6, 4))
-        self._search_bar_visible = True
+        # Start collapsed — Ctrl+F will show it; build it packed then immediately hide
+        self.search_frame.pack_forget()
+        self._search_bar_visible = False
 
         row1 = self._tag_role(tk.Frame(self.search_frame, bg=t["bg_panel"]), "panel")
         row1.pack(fill="x", padx=8, pady=4)
@@ -2812,11 +2855,11 @@ class MisoraApp(tk.Tk):
         )
         self.btn_ribbon_swatch.pack(side="left", padx=(3, 1), pady=1)
 
-        ttk.Button(ribbon, text="Color", style="RibbonPrimary.TButton", width=4, command=self._apply_active_ribbon_color).pack(side="left", padx=1, pady=1)
-        ttk.Button(ribbon, text="Grad", style="RibbonPrimary.TButton", width=4, command=self._apply_active_ribbon_gradient).pack(side="left", padx=1, pady=1)
-        ttk.Button(ribbon, text="Ruby", style="RibbonPrimary.TButton", width=4, command=self.on_insert_ruby).pack(side="left", padx=1, pady=1)
-        ttk.Button(ribbon, text="[-]", style="Ribbon.TButton", width=2, command=lambda: self.apply_ngui_wrapper("[-]", "")).pack(side="left", padx=1, pady=1)
-        ttk.Button(ribbon, text="{player}", style="Ribbon.TButton", command=self.on_insert_playername).pack(side="left", padx=1, pady=1)
+        ttk.Button(ribbon, text="Color", style="RibbonPrimary.TButton", width=10, command=self._apply_active_ribbon_color).pack(side="left", padx=1, pady=1)
+        ttk.Button(ribbon, text="Grad", style="RibbonPrimary.TButton", width=10, command=self._apply_active_ribbon_gradient).pack(side="left", padx=1, pady=1)
+        ttk.Button(ribbon, text="Ruby", style="RibbonPrimary.TButton", width=10, command=self.on_insert_ruby).pack(side="left", padx=1, pady=1)
+        ttk.Button(ribbon, text="[-]", style="Ribbon.TButton", width=10, command=lambda: self.apply_ngui_wrapper("[-]", "")).pack(side="left", padx=1, pady=1)
+        ttk.Button(ribbon, text="{player}", style="Ribbon.TButton", width=10, command=self.on_insert_playername).pack(side="left", padx=1, pady=1)
 
         self._tag_role(tk.Label(ribbon, text="|", bg=t["bg_editor"], fg=t["border"]), "label_ribbon_sep").pack(side="left", padx=2)
 
@@ -2829,6 +2872,7 @@ class MisoraApp(tk.Tk):
             ("Sup", "[sup]", "[/sup]"),
         ]
         for lbl, o_tag, c_tag in mini_style_buttons:
+            # Bug 10: NO width kwarg — ttk auto-sizes to label text (narrowest)
             ttk.Button(
                 ribbon,
                 text=lbl,
@@ -3296,31 +3340,39 @@ class MisoraApp(tk.Tk):
     # Line Numbers Gutter & Column Ruler Synchronization (#12)
     # -------------------------------------------------------------------------
     def _on_toggle_line_numbers(self) -> None:
+        """Toggle line number gutter visibility. Bug 5 fix: safe pack without before=."""
         visible = bool(self.var_show_line_numbers.get())
         self.show_line_numbers = visible
         if hasattr(self, "gutter_clean"):
             if visible:
-                self.gutter_clean.pack(side="left", fill="y", padx=(0, 2), before=self.txt_dialogue)
+                # Re-pack gutter before the text widget (side=left means leftmost = first)
+                self.gutter_clean.pack_forget()
+                self.gutter_clean.pack(side="left", fill="y", padx=(0, 2))
             else:
                 self.gutter_clean.pack_forget()
         if hasattr(self, "gutter_cont"):
             if visible:
-                self.gutter_cont.pack(side="left", fill="y", padx=(0, 2), before=self.txt_continuous)
+                self.gutter_cont.pack_forget()
+                self.gutter_cont.pack(side="left", fill="y", padx=(0, 2))
             else:
                 self.gutter_cont.pack_forget()
         self._save_user_prefs(silent=True)
 
     def _on_toggle_column_ruler(self) -> None:
+        """Toggle column ruler visibility. Bug 5 fix: safe pack without before=.
+        Ruler must be above the editor row, so pack it first (top=0 stacks above)."""
         visible = bool(self.var_show_column_ruler.get())
         self.show_column_ruler = visible
         if hasattr(self, "ruler_clean"):
             if visible:
-                self.ruler_clean.pack(side="top", fill="x", pady=(0, 2), before=self.clean_editor_row)
+                self.ruler_clean.pack_forget()
+                self.ruler_clean.pack(side="top", fill="x", pady=(0, 2))
             else:
                 self.ruler_clean.pack_forget()
         if hasattr(self, "ruler_cont"):
             if visible:
-                self.ruler_cont.pack(side="top", fill="x", padx=8, pady=(2, 2), before=self.cont_editor_row)
+                self.ruler_cont.pack_forget()
+                self.ruler_cont.pack(side="top", fill="x", padx=8, pady=(2, 2))
             else:
                 self.ruler_cont.pack_forget()
         self._save_user_prefs(silent=True)
@@ -4304,17 +4356,18 @@ class MisoraApp(tk.Tk):
         self._sync_gd_scroll_bounds()
 
     def _on_toggle_continuous_view(self) -> None:
-        """Switch Game Display between Page-by-Page mode and Continuous Dialog Stream."""
+        """Switch Game Display between Page-by-Page mode and Continuous Dialog Stream.
+        Bug 6 fix: always call _update_views() so all state is properly refreshed."""
         if self.var_continuous_view.get():
             self.gd_scroll_wrap.pack_forget()
             self.continuous_wrap.pack(fill="both", expand=True, padx=8, pady=(0, 6))
             self.lbl_gd_title.config(text="GAME VIEW (Continuous Stream)")
-            self._render_continuous_view()
-            # Perfectly focus active box when switching to continuous view (#11)
+            self._update_views()  # Bug 6: use _update_views not bare _render_continuous_view
+            # Focus active box when switching to continuous view
             if self.current_doc and self.current_doc.boxes:
-                self._focus_continuous_box(self.current_box_idx, move_cursor=True)
+                self.after(50, lambda: self._focus_continuous_box(self.current_box_idx, move_cursor=True))
         else:
-            # Sync active box from cursor position in continuous view (#11)
+            # Sync active box from cursor position in continuous view
             cur_box = self._find_continuous_box_at_index("insert")
             if cur_box is None:
                 cur_box = self._nearest_continuous_box_to_index("insert")
@@ -4374,9 +4427,9 @@ class MisoraApp(tk.Tk):
         self.bind("<Control-q>", lambda e: self._on_app_exit())
         self.bind("<Control-r>", lambda e: self.on_insert_ruby())
         self.bind("<Control-p>", lambda e: self.on_insert_playername())
-        self.bind("<Control-f>", lambda e: self.on_show_find())
-        self.bind("<Control-F>", lambda e: self.on_show_find_in_files())
-        self.bind("<Control-h>", lambda e: self.on_show_replace())
+        self.bind_all("<Control-f>", lambda e: self.on_show_find())
+        self.bind_all("<Control-F>", lambda e: self.on_show_find_in_files())
+        self.bind_all("<Control-h>", lambda e: self.on_show_replace())
         self.bind("<Control-z>", lambda e: self.on_undo())
         self.bind("<Control-y>", lambda e: self.on_redo())
         self.bind("<Control-Shift-Z>", lambda e: self.on_redo())
@@ -5800,18 +5853,32 @@ class MisoraApp(tk.Tk):
             self._save_user_prefs(silent=True)
 
     def on_open_folder(self) -> None:
+        """Open a folder as search scope; also auto-open the first story file found."""
         init_dir = str(self.selected_search_folder) if getattr(self, "selected_search_folder", None) and self.selected_search_folder.exists() else (
             str(self.last_opened_dir) if getattr(self, "last_opened_dir", None) and self.last_opened_dir.exists() else None
         )
         f = filedialog.askdirectory(initialdir=init_dir, title="Open Project or Asset Folder")
         if f:
-            self.selected_search_folder = Path(f)
-            self.last_opened_dir = Path(f)
+            folder = Path(f)
+            self.selected_search_folder = folder
+            self.last_opened_dir = folder
             self.folder_path_var.set(str(f))
             self.scope_var.set("folder")
             self._sync_scope_widgets()
             self._save_user_prefs(silent=True)
-            self.lbl_status.config(text=f"Selected folder for search: {f}")
+            # Bug 4 fix: scan folder and open first story file
+            story_files = (
+                sorted(folder.glob("*.unity3d")) +
+                sorted(folder.glob("*.asset")) +
+                sorted(folder.glob("*.txt"))
+            )
+            if story_files:
+                self.open_file(story_files[0])
+                self.lbl_status.config(
+                    text=f"Opened \"{story_files[0].name}\" ({len(story_files)} story file(s) in folder). Scope → folder."
+                )
+            else:
+                self.lbl_status.config(text=f"Folder set for search: {f} (no .unity3d/.asset/.txt files found)")
 
     def _sync_scope_widgets(self) -> None:
         """Show or hide folder path entry and browse button based on scope selection."""
@@ -5830,7 +5897,8 @@ class MisoraApp(tk.Tk):
     # -------------------------------------------------------------------------
     def on_show_find(self) -> None:
         if not getattr(self, "_search_bar_visible", False):
-            self.search_frame.pack(before=self.outer_v_paned, fill="x", padx=8, pady=(6, 4))
+            # search_frame and h_paned are both direct children of self (root)
+            self.search_frame.pack(before=self.h_paned, fill="x", padx=8, pady=(6, 4))
             self._search_bar_visible = True
         if getattr(self, "_replace_row_visible", False):
             self.row_replace.pack_forget()
@@ -5844,7 +5912,7 @@ class MisoraApp(tk.Tk):
 
     def on_show_replace(self) -> None:
         if not getattr(self, "_search_bar_visible", False):
-            self.search_frame.pack(before=self.outer_v_paned, fill="x", padx=8, pady=(6, 4))
+            self.search_frame.pack(before=self.h_paned, fill="x", padx=8, pady=(6, 4))
             self._search_bar_visible = True
         if not getattr(self, "_replace_row_visible", False):
             children = self.search_frame.winfo_children()
@@ -7428,12 +7496,6 @@ class TranslatorAssistantDialog(tk.Toplevel):
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.refresh_box()
-
-    def _toggle_pin_top(self):
-        self._is_pinned_top = not getattr(self, "_is_pinned_top", False)
-        self.wm_attributes("-topmost", self._is_pinned_top)
-        self.btn_pin.configure(text="📌" if self._is_pinned_top else "📍")
-        self.app.show_toast(f"Translator Assistant {'pinned on top' if self._is_pinned_top else 'unpinned'}")
 
     def _toggle_pin_top(self):
         self._is_pinned_top = not getattr(self, "_is_pinned_top", False)

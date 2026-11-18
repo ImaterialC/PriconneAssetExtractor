@@ -1,5 +1,5 @@
 {
-  "config_version": 3,
+  "config_version": 4,
   "dialogue_font_family": "Segoe UI",
   "dialogue_font_size": 11,
   "raw_font_size": 9,
@@ -37,7 +37,40 @@
   "datamine_exe": "",
   "external_editor_path": "",
   "notepadpp_path": "C:\\Program Files\\Notepad++\\notepad++.exe",
+  "last_opened_dir": "C:\\[Gacha]\\PriconneRe-TL\\src\\BepInEx\\Translation\\en\\RedirectedResources",
+  "selected_search_folder": "D:\\priconne-asset-extractor-main\\input",
+  "saved_opened_files": [
+    "C:\\[Gacha]\\PriconneRe-TL\\src\\BepInEx\\Translation\\en\\RedirectedResources\\storydata_0000050.unity3d",
+    "C:\\[Gacha]\\PriconneRe-TL\\src\\BepInEx\\Translation\\en\\RedirectedResources\\storydata_0000041.unity3d",
+    "C:\\[Gacha]\\PriconneRe-TL\\src\\BepInEx\\Translation\\en\\RedirectedResources\\storydata_0000011.unity3d"
+  ],
+  "saved_active_file": "C:\\[Gacha]\\PriconneRe-TL\\src\\BepInEx\\Translation\\en\\RedirectedResources\\storydata_0000011.unity3d",
+  "recent_files": [
+    "C:\\[Gacha]\\PriconneRe-TL\\src\\BepInEx\\Translation\\en\\RedirectedResources\\storydata_0000011.unity3d",
+    "C:\\[Gacha]\\PriconneRe-TL\\src\\BepInEx\\Translation\\en\\RedirectedResources\\storydata_0000050.unity3d",
+    "C:\\[Gacha]\\PriconneRe-TL\\src\\BepInEx\\Translation\\en\\RedirectedResources\\storydata_0000041.unity3d"
+  ],
   "left_dock_tab": "files",
   "left_dock_width": 340,
-  "datamine_confirm_skip": false
+  "datamine_confirm_skip": false,
+  "show_line_numbers": true,
+  "show_column_ruler": false,
+  "mtl": {
+    "active_engine": "Google",
+    "src_lang": "ja",
+    "tgt_lang": "en",
+    "deepl_api_key": "",
+    "deepl_use_pro": false,
+    "local_mtl_url": "http://127.0.0.1:14366",
+    "llm_base_url": "http://127.0.0.1:11434/v1",
+    "llm_api_key": "",
+    "llm_model": "qwen2.5:7b",
+    "llm_system_prompt": "You are an expert Japanese-to-English visual novel and game localization translator for 'Princess Connect! Re:Dive'. Translate the dialogue naturally while maintaining character voice and personality. Strictly preserve all placeholders and tags such as __TAG_0__, __VAR_0__, {playername}, and {0}. Output only the translated dialogue without commentary.",
+    "protect_tags": true,
+    "use_xuat_cache": true,
+    "timeout_sec": 12.0,
+    "rate_limit_delay": 0.4,
+    "ai_prompt_include_header": true,
+    "ai_prompt_include_speaker": true
+  }
 }
