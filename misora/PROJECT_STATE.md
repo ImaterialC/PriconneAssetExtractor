@@ -4,7 +4,15 @@
 ---
 
 ## SESSION HANDOFF / RESUME INSTRUCTIONS
-**Current step:** Bug #12 (Color picker window Pillow render + DPI-safe eyedropper + geometry fix) and Bug #3 (P0-1: Ctrl+Z / Ctrl+Y Continuous key guard unblock) applied and tested. Unit tests 11/11 passing.  
+**Current step:** Bug #12 (NGUI Color & Gradient Picker) verified and hardened:
+- SV map & Gradient preview rendered with Pillow `ImageTk.PhotoImage`
+- Hue bar rendered with Tk native `tk.PhotoImage.put()` (bypasses 125%+ DPI narrow canvas clipping)
+- Window geometry set to explicit `400x320` minimum (ensures swatches, hex entry, and insert buttons are never truncated)
+- Canvas images retain explicit C-level references (`canvas.image = img`)
+- Detailed logging added on popup creation
+- Unit tests: 11/11 passing
+- **IMPORTANT NOTE FOR USER:** The app must be fully closed (close existing Misora window) before launching `misora.bat` so Python loads the new files from disk.
+
 **Next action:** Apply DnD improvements (Bug #1: folder multi-file confirmation prompt, large-file safety warning, binary non-text file filter).  
 Awaiting user confirmation to apply DnD improvements.
 
