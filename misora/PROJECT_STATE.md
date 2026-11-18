@@ -1,16 +1,21 @@
 # MISORA — PROJECT STATE
-*Last updated: 2026-11-18 — Bug #12 (NGUI Color Window) and Bug #3 (Continuous Ctrl+Z/Y Undo) fixed*
+*Last updated: 2026-11-18 — Bug #12 (NGUI Color Window) verified by user; Bug #1 (DnD safety & folder support) + Bug #2 (Config persistence) implemented*
 
 ---
 
 ## SESSION HANDOFF / RESUME INSTRUCTIONS
-**Current step:** Bug #12 (Color Picker) root cause found and resolved:
-- Root cause: `self.var_hex = tk.StringVar(value=...)` was called without `master=self`, triggering `RuntimeError: Too early to create variable: no default root window` in Tkinter right after packing `Hex:` label.
-- Fix (`4ea685b`): Added `master=self` to `self.var_hex`, plus added explicit `master=dlg` to all other dialog `StringVar`/`BooleanVar` instances.
-- Tested: `NguiColorPickerPopup` now initializes completely to `420x340` with all 4 child frames mapped, SV map, Hue bar, swatches, and Insert buttons.
-- Unit tests: 11/11 passing.
+**Current step:**
+1. Bug #12 (NGUI Color & Gradient Picker): Confirmed working and complete by user ("yes it complete and work well").
+2. Bug #1 (Drag & Drop Enhancements) & Bug #2 (Config Persistence) implemented in commit `0e1753a`:
+   - Folder drop: Prompts with Yes/No/Cancel dialog (Open all files in tabs / Open first file only & set search scope / Set search scope only).
+   - DnD safety: Batch threshold (warns if >10 files) and file size threshold (warns if >25 MB).
+   - Binary file filter: Blocks non-story binary formats (`.exe`, `.dll`, media, archives, images) from accidentally opening as garbled text.
+   - Force Open: Added `File -> Force Open Any File...` to explicitly bypass extension filters.
+   - DnD settings dialog: Added `Debug -> Drag & Drop Safety Settings...` to customize thresholds or disable them (set to 0).
+   - Config persistence: Geometry, continuous view toggle, sync XUAT toggle, and DnD thresholds persist in `misora_config.json`.
+3. Unit tests: 11/11 passing.
 
-**Next action:** Await user verification of the fully functional color picker window.
+**Next action:** Await user verification of the new DnD & config persistence features, then proceed to next bugs/features (e.g. Bug #15 plain .txt save verification, Bug #9 view toggle scroll sync, Bug #6 ribbon button widths).
 
 ---
 
