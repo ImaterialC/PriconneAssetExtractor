@@ -228,7 +228,7 @@ Bug #6: Buttons use `width=10` fixed. Spec says max = natural width of "Sub"/"Su
 | 9 | Continuous→Page lands wrong box | UNVERIFIED — needs live test |
 | 10 | Up arrow doesn't cross to prev box | DONE in code — lines 4867-4879 + 5291-5298 |
 | 11 | Delete blocked on multi-box selection | PARTIAL — on_clear_dialogue_skeleton exists; spec details unverified |
-| 12 | Eyedropper & Color window broken | DONE — Swapped to Pillow ImageTk.PhotoImage + DPI-aware ImageGrab, fixed window geometry (394x310) |
+| 12 | Eyedropper & Color window broken | DONE — Pillow render + StringVar master fix + 420x340 geometry (user verified working) |
 | 13 | NGUI_TOKEN_RE corrupted | NOT PRESENT — compiles clean |
 | 14 | Gradient separator comma vs hyphen | DECIDED: Ribbon inserts comma `[RRGGBB,RRGGBB]`; parser accepts both `[-,]` |
 | 15 | Plain .txt save "Nothing to Save" | LIKELY FIXED — code path exists; needs live test |
