@@ -1,32 +1,30 @@
 @echo off
 setlocal
-
 cd /d "%~dp0"
 title Misora Editor: Unity3D Revision Tool ^& Story Editor
 
-rem ── Debug mode: pass --debug to show console and log output ─────────────────
-set "DEBUG_FLAG="
-for %%A in (%*) do (
-    if /i "%%~A"=="--debug" set "DEBUG_FLAG=1"
-)
+rem ── Launch via py launcher (preferred) or python on PATH ───────────────────
+rem Section 4-H: Use python.exe / py (NOT pythonw.exe) so Windows console is
+rem visible for live diagnostic logs, and pause on error so failures are readable.
 
-rem ── Launch: pythonw suppresses console window; py shows one (for debugging) ─
 where py >nul 2>&1
 if not errorlevel 1 (
-    if defined DEBUG_FLAG (
-        py -3.12 "%~dp0misora.py" %*
-    ) else (
-        start "" /b pythonw -3.12 "%~dp0misora.py" %*
+    py -3 "%~dp0misora.py" %*
+    if errorlevel 1 (
+        echo.
+        echo [Misora] Process exited with error code %errorlevel%.
+        pause
     )
     goto :end
 )
 
 where python >nul 2>&1
 if not errorlevel 1 (
-    if defined DEBUG_FLAG (
-        python "%~dp0misora.py" %*
-    ) else (
-        start "" /b pythonw "%~dp0misora.py" %*
+    python "%~dp0misora.py" %*
+    if errorlevel 1 (
+        echo.
+        echo [Misora] Process exited with error code %errorlevel%.
+        pause
     )
     goto :end
 )
