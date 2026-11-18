@@ -1435,13 +1435,10 @@ class MisoraApp(tk.Tk):
                 elif role == "label_ribbon_sep":
                     w.configure(bg=t["bg_editor"], fg=t["border"])
                 elif role == "check_panel":
-                    # Radiobuttons use accent color so the selection dot is visible
-                    import tkinter as _tk_local
-                    _sc = t["misora_pink"] if isinstance(w, _tk_local.Radiobutton) else t["bg_dark"]
                     w.configure(
                         bg=t["bg_panel"],
                         fg=panel_fg,
-                        selectcolor=_sc,
+                        selectcolor=t["bg_dark"],
                         activebackground=t["bg_panel"],
                         activeforeground=panel_fg,
                         font=("Segoe UI", u_sz),
@@ -2146,6 +2143,11 @@ class MisoraApp(tk.Tk):
 
         style.configure("TCheckbutton", background=t["bg_dark"], foreground=fg_on_dark, font=("Segoe UI", u_sz))
         style.configure("TRadiobutton", background=t["bg_dark"], foreground=fg_on_dark, font=("Segoe UI", u_sz))
+        style.configure("Panel.TRadiobutton", background=t["bg_panel"], foreground=fg_on_panel, font=("Segoe UI", u_sz))
+        style.map("Panel.TRadiobutton",
+            background=[("active", t["bg_panel"]), ("!active", t["bg_panel"])],
+            foreground=[("active", fg_on_panel), ("!active", fg_on_panel)],
+        )
 
         # Primary Accent Action Button
         style.configure(
@@ -2403,7 +2405,7 @@ class MisoraApp(tk.Tk):
         self._all_menus.append(search_menu)
 
         cust_menu = tk.Menu(menubar, tearoff=0, bg=t["bg_panel"], fg=panel_fg, activebackground=t["misora_pink"], activeforeground=accent_fg)
-        cust_menu.add_command(label="Display & Theme Settings...", command=lambda: self._open_side_drawer("customize"), accelerator="Ctrl+,")
+        cust_menu.add_command(label="Display & Theme Settings...", command=lambda: self._toggle_side_drawer("customize"), accelerator="Ctrl+,")
         cust_menu.add_command(label="AI / LLM Translation Prompt Settings...", command=self.on_open_ai_prompt_settings)
         cust_menu.add_separator()
         cust_menu.add_command(label="Increase Dialogue Font Size", command=lambda: self._adjust_dialogue_font_size(1))
@@ -2767,22 +2769,13 @@ class MisoraApp(tk.Tk):
         self._tag_role(tk.Label(row2, text="|", bg=t["bg_panel"], fg=t["border"]), "label_sep").pack(side="left", padx=8)
 
         self._tag_role(tk.Label(row2, text="Scope:", bg=t["bg_panel"], fg=t["fg_muted"]), "label_muted").pack(side="left", padx=(0, 4))
-        # Use misora_pink as selectcolor so the radio dot is clearly visible
-        # (bg_dark is nearly identical to bg_panel in light themes)
-        _rb_selectcolor = t["misora_pink"]
         self.scope_var = tk.StringVar(master=self, value="project")
 
-        rb_proj = self._tag_role(
-            tk.Radiobutton(row2, text="Project", variable=self.scope_var, value="project", bg=t["bg_panel"], fg=t["fg_text"], selectcolor=_rb_selectcolor, activebackground=t["bg_panel"], command=self._sync_scope_widgets),
-            "check_panel"
-        )
-        rb_proj.pack(side="left", padx=2)
+        self.rb_proj = ttk.Radiobutton(row2, text="Project", variable=self.scope_var, value="project", style="Panel.TRadiobutton", command=self._sync_scope_widgets)
+        self.rb_proj.pack(side="left", padx=2)
 
-        rb_folder = self._tag_role(
-            tk.Radiobutton(row2, text="Folder", variable=self.scope_var, value="folder", bg=t["bg_panel"], fg=t["fg_text"], selectcolor=_rb_selectcolor, activebackground=t["bg_panel"], command=self._sync_scope_widgets),
-            "check_panel"
-        )
-        rb_folder.pack(side="left", padx=2)
+        self.rb_folder = ttk.Radiobutton(row2, text="Folder", variable=self.scope_var, value="folder", style="Panel.TRadiobutton", command=self._sync_scope_widgets)
+        self.rb_folder.pack(side="left", padx=2)
 
         # Folder path entry + browse button (visible when Scope == 'folder')
         self.folder_path_var = tk.StringVar(value="")
@@ -2801,11 +2794,8 @@ class MisoraApp(tk.Tk):
         )
         self.btn_browse_search_folder = ttk.Button(row2, text="...", style="Small.TButton", command=self.on_open_folder, width=2)
 
-        rb_cur = self._tag_role(
-            tk.Radiobutton(row2, text="Current File", variable=self.scope_var, value="current", bg=t["bg_panel"], fg=t["fg_text"], selectcolor=_rb_selectcolor, activebackground=t["bg_panel"], command=self._sync_scope_widgets),
-            "check_panel"
-        )
-        rb_cur.pack(side="left", padx=2)
+        self.rb_cur = ttk.Radiobutton(row2, text="Current File", variable=self.scope_var, value="current", style="Panel.TRadiobutton", command=self._sync_scope_widgets)
+        self.rb_cur.pack(side="left", padx=2)
 
         self._tag_role(tk.Label(row2, text="|", bg=t["bg_panel"], fg=t["border"]), "label_sep").pack(side="left", padx=8)
         cb_bdl = self._tag_role(
@@ -4097,6 +4087,7 @@ class MisoraApp(tk.Tk):
             width=22,
         )
         cb_preset.pack(side="left", fill="x", expand=True, padx=(0, 4))
+        cb_preset.bind("<<ComboboxSelected>>", lambda _e: self._apply_theme_preset(self.var_preset.get()))
         ttk.Button(
             preset_row,
             text="Apply",
@@ -4363,6 +4354,9 @@ class MisoraApp(tk.Tk):
             self.var_ui_font_sz.set(self.prefs["ui_font_size"])
             self.var_preset.set("Misora Purple & White")
 
+        for key, hvar in getattr(self, "_theme_hex_vars", {}).items():
+            if key in self.theme:
+                hvar.set(self.theme[key])
         self._apply_theme_and_fonts_live(save=True)
         self.lbl_status.config(text="Reset display fonts and theme colors to Misora Purple & White default.")
         self.logger.info("UI / Theme / Config", "Reset display fonts and theme colors to default.")
