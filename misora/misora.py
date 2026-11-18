@@ -423,7 +423,7 @@ class NguiColorPickerPopup(tk.Toplevel):
         self.geometry(f"{req_w}x{req_h}+{max(20, px)}+{max(20, py)}")
         self.minsize(req_w, req_h)
         self.resizable(False, False)
-        logger.info("UI / Theme / Config", "NguiColorPickerPopup initialized (%sx%s)", req_w, req_h)
+        self.app.logger.info("UI / Theme / Config", "NguiColorPickerPopup initialized (%sx%s)", req_w, req_h)
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.bind("<Escape>", self._on_escape)
@@ -3527,7 +3527,7 @@ class MisoraApp(tk.Tk):
         self.apply_ngui_wrapper(f"[{c0},{c1}]", "[-]")
 
     def on_open_color_picker(self) -> None:
-        logger.info(
+        self.logger.info(
             "UI / Theme / Config",
             "Opening NGUI Color & Gradient Picker (primary=%s, secondary=%s)",
             self._active_ngui_color,
