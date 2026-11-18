@@ -1,22 +1,43 @@
 {
-  "theme_version": 2,
+  "config_version": 3,
   "dialogue_font_family": "Segoe UI",
   "dialogue_font_size": 11,
   "raw_font_size": 9,
   "ui_font_size": 9,
   "theme": {
-    "bg_dark": "#14141a",
-    "bg_panel": "#1e1e26",
-    "bg_editor": "#181820",
-    "border": "#30303e",
-    "fg_text": "#f0f0f5",
-    "fg_muted": "#9898a8",
-    "misora_pink": "#ff7da7",
-    "misora_pink_hover": "#ff99ba",
-    "misora_pink_active": "#e05a87",
-    "accent_blue": "#68b5f3",
-    "accent_green": "#6ad18a",
-    "accent_yellow": "#f5c26b",
-    "highlight_bg": "#382433"
-  }
+    "bg_dark": "#f3eefb",
+    "bg_panel": "#ffffff",
+    "bg_editor": "#faf8fe",
+    "border": "#d4c4ec",
+    "fg_text": "#221833",
+    "fg_muted": "#6b5a88",
+    "misora_pink": "#7b42bc",
+    "misora_pink_hover": "#9056d2",
+    "misora_pink_active": "#612ea0",
+    "accent_blue": "#536dfe",
+    "accent_green": "#2e7d32",
+    "accent_yellow": "#8e24aa",
+    "highlight_bg": "#e8dbfa"
+  },
+  "debug": {
+    "level": "Info",
+    "log_to_file": false,
+    "categories": {
+      "File I/O": true,
+      "Search": true,
+      "XUAT Sync": true,
+      "UI / Theme / Config": true,
+      "Drag & Drop": true,
+      "Errors & Exceptions": true
+    },
+    "console_visible": false
+  },
+  "backup_folder": "",
+  "bepinex_project_folder": "",
+  "datamine_exe": "",
+  "external_editor_path": "",
+  "notepadpp_path": "C:\\Program Files\\Notepad++\\notepad++.exe",
+  "left_dock_tab": "files",
+  "left_dock_width": 340,
+  "datamine_confirm_skip": false
 }

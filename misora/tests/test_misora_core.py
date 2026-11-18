@@ -3,6 +3,7 @@
 """
 misora/tests/test_misora_core.py - Unit test suite for Misora's core engine.
 """
+import re
 import shutil
 import sys
 import tempfile
@@ -24,6 +25,7 @@ try:
         ProjectSearchEngine, SearchOptions,
         XUnitySyncManager,
         MasterUndoJournal, UndoOperation, BoxEditDelta, PlainTextDelta, BulkFileDelta,
+        TagMasker, MTLConfig, MTLEngine,
     )
 except ImportError:
     from core import (
@@ -33,6 +35,7 @@ except ImportError:
         ProjectSearchEngine, SearchOptions,
         XUnitySyncManager,
         MasterUndoJournal, UndoOperation, BoxEditDelta, PlainTextDelta, BulkFileDelta,
+        TagMasker, MTLConfig, MTLEngine,
     )
 
 
@@ -162,6 +165,61 @@ class TestMisoraCore(unittest.TestCase):
         self.assertIsNotNone(op)
         self.assertEqual(len(op.deltas), 3)
         self.assertEqual(op.label, "Replace All")
+
+    def test_08_tag_masker_roundtrip(self):
+        """TagMasker shields NGUI tags and {playername} during machine translation."""
+        complex_text = "[b]やあ、{playername}！[/b]\\n[rub:ルビ]漢字[/rub]と[c][ff0000]色[/c][-]だよ。"
+        masked, tag_map = TagMasker.mask(complex_text)
+        self.assertNotIn("{playername}", masked)
+        self.assertNotIn("[rub:ルビ]", masked)
+        self.assertIn("__M_", masked)
+        unmasked = TagMasker.unmask(masked, tag_map)
+        self.assertEqual(unmasked, complex_text)
+
+    def test_09_mtl_config_serialization(self):
+        """MTLConfig serializes to and from dict cleanly."""
+        cfg = MTLConfig(
+            active_engine="DeepL",
+            src_lang="ja",
+            tgt_lang="en",
+            deepl_api_key="test_key_123",
+            deepl_use_pro=True,
+            timeout_sec=15.0
+        )
+        data = cfg.to_dict()
+        self.assertEqual(data["active_engine"], "DeepL")
+        self.assertEqual(data["deepl_api_key"], "test_key_123")
+        restored = MTLConfig.from_dict(data)
+        self.assertEqual(restored.active_engine, "DeepL")
+        self.assertEqual(restored.deepl_use_pro, True)
+        self.assertEqual(restored.timeout_sec, 15.0)
+        self.assertEqual(restored.ai_prompt_include_header, True)
+        self.assertEqual(restored.ai_prompt_include_speaker, True)
+
+    def test_10_delimiter_parsing_and_excess_protection(self):
+        """Cross-box delimiter parsing correctly groups dialogue and handles speakers."""
+        sample_clip = (
+            "=== [BOX:0|Speaker:コッコロ] ===\n"
+            "主さま、朝でございますよ。\n\n"
+            "=== [BOX:1|Speaker:ユウキ] ===\n"
+            "おはよう、コッコロ。\n\n"
+            "[BOX:2]\n"
+            "今日も良い天気ですね。"
+        )
+        pattern = re.compile(
+            r"(?:=== )?\[BOX:(\d+)(?:\|Speaker:([^\]]*))?\]\s*(?:===)?\s*\n(.*?)(?=\n(?:=== )?\[BOX:|\Z)",
+            re.DOTALL
+        )
+        matches = list(pattern.finditer(sample_clip))
+        self.assertEqual(len(matches), 3)
+        self.assertEqual(matches[0].group(1), "0")
+        self.assertEqual(matches[0].group(2), "コッコロ")
+        self.assertEqual(matches[0].group(3).strip(), "主さま、朝でございますよ。")
+        self.assertEqual(matches[1].group(1), "1")
+        self.assertEqual(matches[1].group(2), "ユウキ")
+        self.assertEqual(matches[2].group(1), "2")
+        self.assertIsNone(matches[2].group(2))
+        self.assertEqual(matches[2].group(3).strip(), "今日も良い天気ですね。")
 
 
 if __name__ == "__main__":

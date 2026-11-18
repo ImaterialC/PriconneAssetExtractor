@@ -25,6 +25,7 @@ from tkinter import colorchooser, filedialog, messagebox, ttk
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 if sys.platform == "win32":
+    import winreg
     from ctypes import wintypes
 
 # Ensure both Misora root and toolkit parent are in sys.path
@@ -42,6 +43,7 @@ try:
         PlainTextDelta, ProjectSearchEngine, Record, SearchOptions, SearchResult,
         StoryDocument, UndoOperation, XUnitySyncManager, load_bundle_story,
         save_bundle_story,
+        MTLConfig, MTLEngine, TagMasker, translate_async, MTL_ENGINES, DEFAULT_LLM_PROMPT,
     )
 except ImportError:
     from assets.icon import THEME, apply_window_icon
@@ -51,6 +53,7 @@ except ImportError:
         PlainTextDelta, ProjectSearchEngine, Record, SearchOptions, SearchResult,
         StoryDocument, UndoOperation, XUnitySyncManager, load_bundle_story,
         save_bundle_story,
+        MTLConfig, MTLEngine, TagMasker, translate_async, MTL_ENGINES, DEFAULT_LLM_PROMPT,
     )
 
 CONFIG_PATH = SCRIPT_DIR / "misora_config.json"
@@ -536,7 +539,7 @@ class NguiColorPickerPopup(tk.Toplevel):
 
         self.btn_eyedropper = tk.Button(
             side_col,
-            text="Eyedropper",
+            text="🧪 Eyedropper",
             font=("Segoe UI", 8, "bold"),
             bg=t["bg_editor"],
             fg=editor_fg,
@@ -769,8 +772,13 @@ class NguiColorPickerPopup(tk.Toplevel):
             self.lbl_eye_hint.configure(text="Screen eyedropper requires Windows; use map or swatches.")
             return
 
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except Exception:
+            pass
+
         self._eyedropper_active = True
-        self._mouse_was_down = bool(ctypes.windll.user32.GetAsyncKeyState(0x01) & 0x8000)
+        self._waiting_for_release = True
         self.btn_eyedropper.configure(
             text="Sampling... (Click)",
             bg=self.theme["misora_pink"],
@@ -806,11 +814,14 @@ class NguiColorPickerPopup(tk.Toplevel):
                 return
 
             mouse_down = bool(user32.GetAsyncKeyState(0x01) & 0x8000)
-            if mouse_down and not self._mouse_was_down:
-                self._stop_eyedropper()
-                self.lift()
-                return
-            self._mouse_was_down = mouse_down
+            if self._waiting_for_release:
+                if not mouse_down:
+                    self._waiting_for_release = False
+            else:
+                if mouse_down:
+                    self._stop_eyedropper()
+                    self.lift()
+                    return
         except Exception:
             self._stop_eyedropper()
             return
@@ -819,6 +830,7 @@ class NguiColorPickerPopup(tk.Toplevel):
 
     def _stop_eyedropper(self) -> None:
         self._eyedropper_active = False
+        self._waiting_for_release = False
         if self._eyedropper_after_id is not None:
             try:
                 self.after_cancel(self._eyedropper_after_id)
@@ -827,7 +839,7 @@ class NguiColorPickerPopup(tk.Toplevel):
             self._eyedropper_after_id = None
         if self.winfo_exists():
             self.btn_eyedropper.configure(
-                text="Eyedropper",
+                text="🧪 Eyedropper",
                 bg=self.theme["bg_editor"],
                 fg=best_contrast_fg(self.theme["bg_editor"], self.theme["fg_text"], "#ffffff"),
             )
@@ -870,7 +882,22 @@ class MisoraApp(tk.Tk):
         self.logger = MisoraLogger(DEBUG_LOG_PATH)
         self._install_exception_hooks()
 
-        # Load persistent user preferences (fonts, theme colors, debug console settings)
+        # Path config & persistent workspace states (initialized before _load_user_prefs)
+        self.backup_folder: Optional[Path] = None
+        self.bepinex_project_folder: Optional[Path] = None
+        self.datamine_exe: Optional[Path] = None
+        self.external_editor_path: Optional[Path] = None
+        self.notepadpp_path: Optional[Path] = None
+        self._datamine_confirm_skip: bool = False
+        self._left_dock_tab: str = "search"
+        self._left_dock_width: int = 340
+        self.show_line_numbers: bool = True
+        self.show_column_ruler: bool = False
+        self.mtl_config: MTLConfig = MTLConfig()
+        self._translator_dialog: Optional[Any] = None
+        self._side_drawer_pinned: bool = False
+
+        # Load persistent user preferences (fonts, theme colors, paths, mtl settings)
         self.prefs: Dict[str, Any] = self._load_user_prefs()
         self.theme: Dict[str, str] = dict(self.prefs["theme"])
         THEME.update(self.theme)
@@ -898,17 +925,9 @@ class MisoraApp(tk.Tk):
         self.xuat_search_roots: List[Path] = []
         self.selected_search_folder: Optional[Path] = None
 
-        # Steps 3-4: Undo journal, opened-files cache, path config
+        # Steps 3-4: Undo journal & opened-files cache
         self.undo_journal: MasterUndoJournal = MasterUndoJournal()
         self.open_documents: Dict[Path, Any] = {}   # path -> open doc info dict
-        self.backup_folder: Optional[Path] = None   # None = auto (SCRIPT_DIR/backups)
-        self.bepinex_project_folder: Optional[Path] = None
-        self.datamine_exe: Optional[Path] = None
-        self.external_editor_path: Optional[Path] = None
-        self.notepadpp_path: Optional[Path] = None
-        self._datamine_confirm_skip: bool = False
-        self._left_dock_tab: str = "search"         # "search" | "files"
-        self._left_dock_width: int = 340
 
         # Active NGUI Ribbon color state
         self._active_ngui_color: str = "#7b42bc"
@@ -969,16 +988,11 @@ class MisoraApp(tk.Tk):
         self._build_search_bar()
         self._build_main_panels()
         self._build_side_drawer()
-        self._build_debug_console()
         self._build_status_bar()
         self._bind_shortcuts()
 
         # Sync initial widget fonts & colors with saved preferences
         self._apply_theme_and_fonts_live(save=False)
-
-        # Restore console visibility if saved
-        if self._console_visible:
-            self._set_console_visible(True, save=False)
 
         # Flush config on exit and unhook Win32 WNDPROC cleanly
         self.protocol("WM_DELETE_WINDOW", self._on_app_exit)
@@ -987,9 +1001,8 @@ class MisoraApp(tk.Tk):
         # Enable native OS Drag & Drop safely on the outer frame HWND
         self._init_drag_and_drop()
 
-        # Start periodic poll for background tasks & log console entries
+        # Start periodic poll for background tasks
         self.after(100, self._process_search_queue)
-        self.after(120, self._flush_log_console)
 
         self.logger.info("UI / Theme / Config", f"Misora initialized. Config path: {CONFIG_PATH}")
 
@@ -1093,12 +1106,18 @@ class MisoraApp(tk.Tk):
                     self._left_dock_width = max(140, min(600, raw["left_dock_width"]))
                 if isinstance(raw.get("datamine_confirm_skip"), bool):
                     self._datamine_confirm_skip = raw["datamine_confirm_skip"]
+                if isinstance(raw.get("show_line_numbers"), bool):
+                    self.show_line_numbers = raw["show_line_numbers"]
+                if isinstance(raw.get("show_column_ruler"), bool):
+                    self.show_column_ruler = raw["show_column_ruler"]
+                if isinstance(raw.get("mtl"), dict):
+                    self.mtl_config = MTLConfig.from_dict(raw["mtl"])
             except Exception as exc:
                 self.logger.warning("UI / Theme / Config", f"Failed to parse {CONFIG_PATH}: {exc}")
         return prefs
 
     def _save_user_prefs(self, silent: bool = False) -> None:
-        """Atomically persist current font, theme & debug preferences to misora_config.json."""
+        """Atomically persist current font, theme, path & MTL preferences to misora_config.json."""
         try:
             dbg_snapshot = self.logger.get_config_snapshot()
             dbg_snapshot["console_visible"] = (
@@ -1109,14 +1128,14 @@ class MisoraApp(tk.Tk):
             self.prefs["debug"] = dbg_snapshot
 
             payload = {
-                "config_version": 3,
+                "config_version": 4,
                 "dialogue_font_family": str(self.prefs["dialogue_font_family"]),
                 "dialogue_font_size": int(self.prefs["dialogue_font_size"]),
                 "raw_font_size": int(self.prefs["raw_font_size"]),
                 "ui_font_size": int(self.prefs["ui_font_size"]),
                 "theme": dict(self.theme),
                 "debug": dbg_snapshot,
-                # Step 3-4 path/dock state
+                # Path & dock state
                 "backup_folder": str(self.backup_folder) if self.backup_folder else "",
                 "bepinex_project_folder": str(self.bepinex_project_folder) if self.bepinex_project_folder else "",
                 "datamine_exe": str(self.datamine_exe) if self.datamine_exe else "",
@@ -1125,6 +1144,11 @@ class MisoraApp(tk.Tk):
                 "left_dock_tab": self._left_dock_tab if hasattr(self, "_left_dock_tab") else "search",
                 "left_dock_width": self._left_dock_width if hasattr(self, "_left_dock_width") else 340,
                 "datamine_confirm_skip": self._datamine_confirm_skip if hasattr(self, "_datamine_confirm_skip") else False,
+                # Line numbers & rulers
+                "show_line_numbers": bool(self.var_show_line_numbers.get()) if hasattr(self, "var_show_line_numbers") else self.show_line_numbers,
+                "show_column_ruler": bool(self.var_show_column_ruler.get()) if hasattr(self, "var_show_column_ruler") else self.show_column_ruler,
+                # MTL translation configuration
+                "mtl": self.mtl_config.to_dict() if hasattr(self, "mtl_config") else {},
             }
             CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
             tmp_path = CONFIG_PATH.with_suffix(".json.tmp")
@@ -1146,6 +1170,10 @@ class MisoraApp(tk.Tk):
     def _is_dark_color(hex_color: str) -> bool:
         """Return True if a #RRGGBB color has low WCAG relative luminance."""
         return wcag_relative_luminance(hex_color) < 0.179
+
+    def _is_light_theme(self) -> bool:
+        """Return True if current active theme panel background is light."""
+        return not self._is_dark_color(self.theme.get("bg_panel", "#ffffff"))
 
     @staticmethod
     def _shift_hex(hex_color: str, delta: int) -> str:
@@ -1288,6 +1316,28 @@ class MisoraApp(tk.Tk):
             font=("Segoe UI", u_sz, "bold"),
         )
 
+        if hasattr(self, "txt_opened_files"):
+            self.txt_opened_files.configure(
+                bg=t["bg_editor"],
+                fg=editor_fg,
+                font=("Segoe UI", u_sz),
+            )
+            self.txt_opened_files.tag_configure("file_active", font=("Segoe UI", u_sz, "bold"), foreground=t["misora_pink"], background=t["highlight_bg"])
+            self.txt_opened_files.tag_configure("file_dirty", font=("Segoe UI", u_sz, "bold"), foreground=t["accent_yellow"])
+            self.txt_opened_files.tag_configure("file_normal", font=("Segoe UI", u_sz), foreground=editor_fg)
+            self.txt_opened_files.tag_configure("file_dim", font=("Segoe UI", max(8, u_sz - 1)), foreground=t["fg_muted"])
+
+        gutter_bg = "#e8e8e8" if self._is_light_theme() else "#2d2d30"
+        gutter_fg = "#707070" if self._is_light_theme() else "#858585"
+        if hasattr(self, "gutter_clean"):
+            self.gutter_clean.configure(bg=gutter_bg, fg=gutter_fg)
+        if hasattr(self, "gutter_cont"):
+            self.gutter_cont.configure(bg=gutter_bg, fg=gutter_fg)
+        if hasattr(self, "ruler_clean"):
+            self.ruler_clean.configure(bg=gutter_bg, fg=gutter_fg)
+        if hasattr(self, "ruler_cont"):
+            self.ruler_cont.configure(bg=gutter_bg, fg=gutter_fg)
+
         self.txt_dialogue.configure(
             font=(d_fam, d_sz),
             bg=t["bg_editor"],
@@ -1350,10 +1400,51 @@ class MisoraApp(tk.Tk):
         if save:
             self._save_user_prefs()
 
+    def show_toast(self, message: str, duration_ms: int = 2200, is_accent: bool = True) -> None:
+        """Display a non-intrusive floating toast notification in the bottom right corner."""
+        try:
+            if hasattr(self, "_toast_after_id") and self._toast_after_id:
+                self.after_cancel(self._toast_after_id)
+                self._toast_after_id = None
+            if not hasattr(self, "_toast_widget") or not self._toast_widget.winfo_exists():
+                self._toast_widget = tk.Label(
+                    self,
+                    text="",
+                    font=("Segoe UI", 10, "bold"),
+                    bd=1,
+                    relief="solid",
+                    padx=14,
+                    pady=6,
+                )
+            t = self.theme
+            bg_col = t["misora_pink"] if is_accent else t["bg_editor"]
+            fg_col = best_contrast_fg(bg_col)
+            self._toast_widget.configure(
+                text=message,
+                bg=bg_col,
+                fg=fg_col,
+                highlightthickness=1,
+                highlightbackground=t["border"],
+            )
+            self._toast_widget.place(relx=0.98, rely=0.94, anchor="se")
+            self._toast_widget.lift()
+
+            def hide():
+                if hasattr(self, "_toast_widget") and self._toast_widget.winfo_exists():
+                    self._toast_widget.place_forget()
+
+            self._toast_after_id = self.after(duration_ms, hide)
+        except Exception:
+            pass
+
     def _configure_editor_rich_tags(self, widget: tk.Text, d_fam: str, d_sz: int) -> None:
         """Configure syntax highlight & compiled NGUI preview tags on a dialogue text widget."""
         t = self.theme
         hl_fg = best_contrast_fg(t["highlight_bg"], t["misora_pink"], "#ffffff")
+        widget.tag_configure(
+            "secret_whitespace",
+            background="#ffd6d6" if self._is_light_theme() else "#552020",
+        )
         widget.tag_configure(
             "ngui_tag",
             foreground=t["accent_yellow"],
@@ -1740,7 +1831,7 @@ class MisoraApp(tk.Tk):
             foreground=[("active", fg_btn_hover), ("pressed", fg_btn_press)],
         )
 
-        # NGUI Ribbon — Prominent Action Buttons (Color, Grad, + Ruby) (#7)
+        # NGUI Ribbon — Prominent Action Buttons (Color, Grad, Ruby) (#7)
         style.configure(
             "RibbonPrimary.TButton",
             background=accent_bg,
@@ -1749,7 +1840,7 @@ class MisoraApp(tk.Tk):
             borderwidth=1,
             relief="raised",
             font=("Segoe UI", max(8, u_sz - 1), "bold"),
-            padding=(7, 1),
+            padding=(3, 1),
         )
         style.map(
             "RibbonPrimary.TButton",
@@ -1766,7 +1857,7 @@ class MisoraApp(tk.Tk):
             borderwidth=1,
             relief="raised",
             font=("Segoe UI", max(8, u_sz - 1), "bold"),
-            padding=(5, 1),
+            padding=(2, 1),
         )
         style.map(
             "Ribbon.TButton",
@@ -1774,7 +1865,7 @@ class MisoraApp(tk.Tk):
             foreground=[("active", fg_hl), ("pressed", fg_btn_press)],
         )
 
-        # NGUI Ribbon — Tiny Mini-Buttons (B, I, U, S, Sub, Sup) (#7)
+        # NGUI Ribbon — Tiny Mini-Buttons (B, I, U, S, Sub, Sup, Undo, Redo) (#7)
         style.configure(
             "RibbonMini.TButton",
             background=btn_bg,
@@ -1783,7 +1874,7 @@ class MisoraApp(tk.Tk):
             borderwidth=1,
             relief="raised",
             font=("Segoe UI", max(7, u_sz - 2), "bold"),
-            padding=(3, 0),
+            padding=(1, 0),
         )
         style.map(
             "RibbonMini.TButton",
@@ -1864,11 +1955,19 @@ class MisoraApp(tk.Tk):
         view_menu.add_separator()
         view_menu.add_command(label="Toggle Customization Panel", command=lambda: self._toggle_side_drawer("customize"), accelerator="Ctrl+,")
         view_menu.add_command(label="Toggle NGUI Glossary Panel", command=lambda: self._toggle_side_drawer("glossary"), accelerator="F1")
+        view_menu.add_separator()
+        self.var_show_line_numbers = tk.BooleanVar(value=self.show_line_numbers)
         view_menu.add_checkbutton(
-            label="Debug Console",
-            variable=self.var_console_visible,
-            command=self._on_toggle_console_menu,
-            accelerator="F12",
+            label="Show Line Numbers (Vertical)",
+            variable=self.var_show_line_numbers,
+            command=self._on_toggle_line_numbers,
+            selectcolor=t["misora_pink"],
+        )
+        self.var_show_column_ruler = tk.BooleanVar(value=self.show_column_ruler)
+        view_menu.add_checkbutton(
+            label="Show Column Ruler (Horizontal)",
+            variable=self.var_show_column_ruler,
+            command=self._on_toggle_column_ruler,
             selectcolor=t["misora_pink"],
         )
         menubar.add_cascade(label="View", menu=view_menu)
@@ -1885,6 +1984,7 @@ class MisoraApp(tk.Tk):
 
         cust_menu = tk.Menu(menubar, tearoff=0, bg=t["bg_panel"], fg=panel_fg, activebackground=t["misora_pink"], activeforeground=accent_fg)
         cust_menu.add_command(label="Display & Theme Settings...", command=lambda: self._open_side_drawer("customize"), accelerator="Ctrl+,")
+        cust_menu.add_command(label="AI / LLM Translation Prompt Settings...", command=self.on_open_ai_prompt_settings)
         cust_menu.add_separator()
         cust_menu.add_command(label="Increase Dialogue Font Size", command=lambda: self._adjust_dialogue_font_size(1))
         cust_menu.add_command(label="Decrease Dialogue Font Size", command=lambda: self._adjust_dialogue_font_size(-1))
@@ -1966,8 +2066,63 @@ class MisoraApp(tk.Tk):
             label="Open Misora Program Folder",
             command=self.on_open_program_folder,
         )
+        folders_menu.add_separator()
+        folders_menu.add_command(
+            label="Register .unity3d Association (Current User)...",
+            command=self.on_register_unity3d_association,
+        )
         menubar.add_cascade(label="Folders & Files", menu=folders_menu)
         self._all_menus.append(folders_menu)
+
+        # TRANSLATOR MENU
+        translator_menu = tk.Menu(
+            menubar,
+            tearoff=0,
+            bg=t["bg_panel"],
+            fg=panel_fg,
+            activebackground=t["misora_pink"],
+            activeforeground=accent_fg,
+        )
+        translator_menu.add_command(
+            label="Translator Assistant...",
+            command=self.on_open_translator_assistant,
+            accelerator="Ctrl+T",
+        )
+        translator_menu.add_command(
+            label="Translate Current Box",
+            command=self.on_translate_current_box,
+            accelerator="F8",
+        )
+        translator_menu.add_command(
+            label="Batch Translate Story...",
+            command=self.on_batch_translate,
+        )
+        translator_menu.add_separator()
+        translator_menu.add_command(
+            label="Configure MTL Sources & Keys...",
+            command=self.on_open_mtl_settings,
+        )
+        translator_menu.add_command(
+            label="Configure AI / LLM Prompt Header...",
+            command=self.on_open_ai_prompt_settings,
+        )
+        translator_menu.add_separator()
+        translator_menu.add_command(
+            label="Copy AI Translation Prompt",
+            command=self.on_copy_ai_prompt,
+            accelerator="Ctrl+Shift+T",
+        )
+        translator_menu.add_command(
+            label="Apply Translation from Clipboard...",
+            command=self.on_apply_translation_clipboard,
+        )
+        translator_menu.add_separator()
+        translator_menu.add_command(
+            label="Clear Dialogue (Keep Skeleton Only)...",
+            command=self.on_clear_dialogue_skeleton,
+        )
+        menubar.add_cascade(label="Translator", menu=translator_menu)
+        self._all_menus.append(translator_menu)
 
         # DATAMINE MENU (#4C)
         datamine_menu = tk.Menu(
@@ -2004,13 +2159,6 @@ class MisoraApp(tk.Tk):
             activebackground=t["misora_pink"],
             activeforeground=accent_fg,
             postcommand=self._sync_debug_menu_states,
-        )
-        self.debug_menu.add_checkbutton(
-            label="Console",
-            variable=self.var_console_visible,
-            command=self._on_toggle_console_menu,
-            accelerator="F12",
-            selectcolor=t["misora_pink"],
         )
 
         cat_sub = tk.Menu(self.debug_menu, tearoff=0, bg=t["bg_panel"], fg=panel_fg, activebackground=t["misora_pink"], activeforeground=accent_fg)
@@ -2258,22 +2406,9 @@ class MisoraApp(tk.Tk):
         r_sz = int(self.prefs["raw_font_size"])
         u_sz = int(self.prefs["ui_font_size"])
 
-        self.outer_v_paned = self._tag_role(
-            tk.PanedWindow(
-                self,
-                orient=tk.VERTICAL,
-                bg=t["border"],
-                sashwidth=6,
-                sashrelief="flat",
-                opaqueresize=True,
-            ),
-            "sash",
-        )
-        self.outer_v_paned.pack(fill="both", expand=True, padx=8, pady=4)
-
         self.h_paned = self._tag_role(
             tk.PanedWindow(
-                self.outer_v_paned,
+                self,
                 orient=tk.HORIZONTAL,
                 bg=t["border"],
                 sashwidth=6,
@@ -2282,7 +2417,7 @@ class MisoraApp(tk.Tk):
             ),
             "sash"
         )
-        self.outer_v_paned.add(self.h_paned, minsize=260, stretch="always")
+        self.h_paned.pack(fill="both", expand=True, padx=8, pady=4)
 
         # LEFT PANEL: Upgraded Dual-Tab Dock (Search Results & Opened Files Cache #3B)
         self.left_frame = self._tag_role(tk.Frame(self.h_paned, bg=t["bg_panel"]), "panel")
@@ -2493,12 +2628,12 @@ class MisoraApp(tk.Tk):
         self.v_paned.add(top_view, minsize=140, height=400, stretch="always")
 
         gd_header = self._tag_role(tk.Frame(top_view, bg=t["bg_panel"]), "panel")
-        gd_header.pack(fill="x", padx=8, pady=(6, 4))
+        gd_header.pack(fill="x", padx=8, pady=(4, 2))
 
         self.lbl_gd_title = self._tag_role(
             tk.Label(
                 gd_header,
-                text="GAME DISPLAY VIEW (Clean Dialogue)",
+                text="GAME VIEW (Clean Dialogue)",
                 font=("Segoe UI", u_sz, "bold"),
                 bg=t["bg_panel"],
                 fg=t["misora_pink"]
@@ -2507,17 +2642,22 @@ class MisoraApp(tk.Tk):
         )
         self.lbl_gd_title.pack(side="left")
 
-        # (#5 & #6: Customize and NGUI Glossary removed from header; distinct Nav buttons #4)
         self.lbl_box_counter = self._tag_role(
             tk.Label(gd_header, text="Box: 0 / 0", font=("Segoe UI", u_sz), bg=t["bg_panel"], fg=t["fg_muted"]),
             "label_muted"
         )
-        self.lbl_box_counter.pack(side="right", padx=(8, 0))
+        self.lbl_box_counter.pack(side="right", padx=(6, 0))
 
         btn_next = ttk.Button(gd_header, text="Next >", style="Nav.TButton", command=self.on_next_box)
-        btn_next.pack(side="right", padx=(3, 0))
+        btn_next.pack(side="right", padx=(2, 0))
         btn_prev = ttk.Button(gd_header, text="< Prev", style="Nav.TButton", command=self.on_prev_box)
-        btn_prev.pack(side="right", padx=(6, 2))
+        btn_prev.pack(side="right", padx=(4, 2))
+
+        btn_ai_prompt = ttk.Button(gd_header, text="📋 AI Prompt", style="Small.TButton", command=self.on_copy_ai_prompt)
+        btn_ai_prompt.pack(side="right", padx=(4, 2))
+
+        btn_translate = ttk.Button(gd_header, text="🌐 MTL", style="Small.TButton", command=self.on_open_translator_assistant)
+        btn_translate.pack(side="right", padx=(2, 2))
 
         cb_cont = self._tag_role(
             tk.Checkbutton(
@@ -2535,11 +2675,11 @@ class MisoraApp(tk.Tk):
             ),
             "check_accent"
         )
-        cb_cont.pack(side="right", padx=(6, 6))
+        cb_cont.pack(side="right", padx=(4, 6))
 
-        # (#7: Single Combined Row for Speaker + Compact NGUI Ribbon)
+        # Combined Row for Speaker + Compact NGUI Ribbon (#7 & #10)
         speaker_ribbon_row = self._tag_role(tk.Frame(top_view, bg=t["bg_panel"]), "panel")
-        speaker_ribbon_row.pack(fill="x", padx=10, pady=(2, 6))
+        speaker_ribbon_row.pack(fill="x", padx=8, pady=(2, 4))
 
         self._tag_role(
             tk.Label(speaker_ribbon_row, text="Speaker:", bg=t["bg_panel"], fg=t["fg_muted"]),
@@ -2559,27 +2699,35 @@ class MisoraApp(tk.Tk):
                 selectforeground=t["misora_pink"],
                 bd=1,
                 relief="solid",
-                width=18
+                width=14
             ),
             "entry_speaker"
         )
         self.entry_speaker.pack(side="left")
         self.entry_speaker.bind("<KeyRelease>", lambda e: self._on_speaker_edited())
 
+        self.btn_speaker_dropdown = ttk.Button(
+            speaker_ribbon_row,
+            text="▼",
+            style="Small.TButton",
+            width=2,
+            command=self._on_speaker_dropdown_clicked,
+        )
+        self.btn_speaker_dropdown.pack(side="left", padx=(2, 4))
+
         self.lbl_voice_cue = self._tag_role(
             tk.Label(speaker_ribbon_row, text="", bg=t["bg_panel"], fg=t["accent_blue"], font=("Segoe UI", max(8, u_sz - 1))),
             "label_voice"
         )
-        self.lbl_voice_cue.pack(side="left", padx=(6, 6))
+        self.lbl_voice_cue.pack(side="left", padx=(2, 4))
 
-        # Compact NGUI Ribbon docked on the right side of the Speaker row (#7)
+        # Compact NGUI Ribbon docked on the right side of the Speaker row
         ribbon = self._tag_role(
             tk.Frame(speaker_ribbon_row, bg=t["bg_editor"], bd=1, relief="solid", highlightbackground=t["border"], highlightthickness=1),
             "ribbon"
         )
         ribbon.pack(side="right", padx=(4, 0))
 
-        # Prominent Color / Grad / + Ruby controls (#7)
         self.btn_ribbon_swatch = tk.Button(
             ribbon,
             width=2,
@@ -2590,73 +2738,65 @@ class MisoraApp(tk.Tk):
             cursor="hand2",
             command=self.on_open_color_picker,
         )
-        self.btn_ribbon_swatch.pack(side="left", padx=(4, 2), pady=2)
+        self.btn_ribbon_swatch.pack(side="left", padx=(3, 1), pady=1)
 
-        ttk.Button(
-            ribbon,
-            text="Color",
-            style="RibbonPrimary.TButton",
-            command=self._apply_active_ribbon_color,
-        ).pack(side="left", padx=1, pady=2)
+        ttk.Button(ribbon, text="Color", style="RibbonPrimary.TButton", width=4, command=self._apply_active_ribbon_color).pack(side="left", padx=1, pady=1)
+        ttk.Button(ribbon, text="Grad", style="RibbonPrimary.TButton", width=4, command=self._apply_active_ribbon_gradient).pack(side="left", padx=1, pady=1)
+        ttk.Button(ribbon, text="Ruby", style="RibbonPrimary.TButton", width=4, command=self.on_insert_ruby).pack(side="left", padx=1, pady=1)
+        ttk.Button(ribbon, text="[-]", style="Ribbon.TButton", width=2, command=lambda: self.apply_ngui_wrapper("[-]", "")).pack(side="left", padx=1, pady=1)
+        ttk.Button(ribbon, text="{player}", style="Ribbon.TButton", width=6, command=self.on_insert_playername).pack(side="left", padx=1, pady=1)
 
-        ttk.Button(
-            ribbon,
-            text="Grad",
-            style="RibbonPrimary.TButton",
-            command=self._apply_active_ribbon_gradient,
-        ).pack(side="left", padx=1, pady=2)
+        self._tag_role(tk.Label(ribbon, text="|", bg=t["bg_editor"], fg=t["border"]), "label_ribbon_sep").pack(side="left", padx=2)
 
-        ttk.Button(
-            ribbon,
-            text="+ Ruby",
-            style="RibbonPrimary.TButton",
-            command=self.on_insert_ruby,
-        ).pack(side="left", padx=(1, 2), pady=2)
-
-        ttk.Button(
-            ribbon,
-            text="[-]",
-            style="Ribbon.TButton",
-            command=lambda: self.apply_ngui_wrapper("[-]", ""),
-        ).pack(side="left", padx=1, pady=2)
-
-        ttk.Button(
-            ribbon,
-            text="{player}",
-            style="Ribbon.TButton",
-            command=self.on_insert_playername,
-        ).pack(side="left", padx=1, pady=2)
-
-        self._tag_role(tk.Label(ribbon, text="|", bg=t["bg_editor"], fg=t["border"]), "label_ribbon_sep").pack(side="left", padx=3)
-
-        # Tiny mini-buttons for B, I, U, S, Sub, Sup (#7)
         mini_style_buttons = [
-            ("B", "[b]", "[/b]"),
-            ("I", "[i]", "[/i]"),
-            ("U", "[u]", "[/u]"),
-            ("S", "[s]", "[/s]"),
-            ("Sub", "[sub]", "[/sub]"),
-            ("Sup", "[sup]", "[/sup]"),
+            ("B", "[b]", "[/b]", 1),
+            ("I", "[i]", "[/i]", 1),
+            ("U", "[u]", "[/u]", 1),
+            ("S", "[s]", "[/s]", 1),
+            ("Sub", "[sub]", "[/sub]", 3),
+            ("Sup", "[sup]", "[/sup]", 3),
         ]
-        for lbl, o_tag, c_tag in mini_style_buttons:
+        for lbl, o_tag, c_tag, w_len in mini_style_buttons:
             ttk.Button(
                 ribbon,
                 text=lbl,
                 style="RibbonMini.TButton",
+                width=w_len,
                 command=lambda ot=o_tag, ct=c_tag: self.apply_ngui_wrapper(ot, ct),
-            ).pack(side="left", padx=1, pady=2)
+            ).pack(side="left", padx=1, pady=1)
 
-        self._tag_role(tk.Label(ribbon, text="|", bg=t["bg_editor"], fg=t["border"]), "label_ribbon_sep").pack(side="left", padx=3)
+        self._tag_role(tk.Label(ribbon, text="|", bg=t["bg_editor"], fg=t["border"]), "label_ribbon_sep").pack(side="left", padx=2)
+
+        # Explicit Undo & Redo buttons (#10)
+        self.btn_ribbon_undo = ttk.Button(
+            ribbon,
+            text="↶",
+            style="RibbonMini.TButton",
+            width=2,
+            command=self.on_undo,
+        )
+        self.btn_ribbon_undo.pack(side="left", padx=1, pady=1)
+
+        self.btn_ribbon_redo = ttk.Button(
+            ribbon,
+            text="↷",
+            style="RibbonMini.TButton",
+            width=2,
+            command=self.on_redo,
+        )
+        self.btn_ribbon_redo.pack(side="left", padx=1, pady=1)
+
+        self._tag_role(tk.Label(ribbon, text="|", bg=t["bg_editor"], fg=t["border"]), "label_ribbon_sep").pack(side="left", padx=2)
 
         cb_compiled = self._tag_role(
             tk.Checkbutton(
                 ribbon,
-                text="Compiled",
+                text="Preview",
                 variable=self.var_preview_compiled,
                 command=self._on_toggle_preview_compiled,
-                font=("Segoe UI", 8, "bold"),
+                font=("Segoe UI", max(8, u_sz - 2), "bold"),
                 bg=t["bg_editor"],
-                fg=t["misora_pink"],
+                fg=t["fg_text"],
                 selectcolor=t["bg_panel"],
                 activebackground=t["bg_editor"],
                 activeforeground=t["misora_pink"],
@@ -2664,7 +2804,10 @@ class MisoraApp(tk.Tk):
             ),
             "check_ribbon"
         )
-        cb_compiled.pack(side="left", padx=(2, 4), pady=2)
+        cb_compiled.pack(side="left", padx=(2, 3), pady=1)
+
+        gutter_bg = "#e8e8e8" if self._is_light_theme() else "#2d2d30"
+        gutter_fg = "#707070" if self._is_light_theme() else "#858585"
 
         # VIEW 1: Bounded Scrollable Page-by-Page Viewport
         self.gd_scroll_wrap = self._tag_role(tk.Frame(top_view, bg=t["bg_panel"]), "panel")
@@ -2697,8 +2840,50 @@ class MisoraApp(tk.Tk):
         text_container = self._tag_role(tk.Frame(self.gd_inner, bg=t["bg_panel"]), "panel")
         text_container.pack(fill="both", expand=True, padx=6, pady=(2, 10))
 
-        self.txt_dialogue = tk.Text(
+        # Horizontal Column Ruler for Clean View (#12)
+        self.ruler_clean = tk.Text(
             text_container,
+            height=1,
+            font=("Consolas", max(8, d_sz - 2)),
+            bg=gutter_bg,
+            fg=gutter_fg,
+            bd=0,
+            relief="flat",
+            wrap="none",
+            takefocus=0,
+            cursor="arrow",
+        )
+        self.ruler_clean.insert("1.0", "     ....5...10...15...20...25...30...35...40...45...50...55...60...65...70...75...80")
+        self.ruler_clean.config(state="disabled")
+        if self.show_column_ruler:
+            self.ruler_clean.pack(side="top", fill="x", pady=(0, 2))
+
+        self.clean_editor_row = tk.Frame(text_container, bg=t["bg_panel"])
+        self.clean_editor_row.pack(fill="both", expand=True)
+
+        # Vertical Line Numbers Gutter for Clean View (#12)
+        self.gutter_clean = tk.Text(
+            self.clean_editor_row,
+            width=3,
+            font=("Consolas", d_sz),
+            bg=gutter_bg,
+            fg=gutter_fg,
+            bd=0,
+            relief="flat",
+            wrap="none",
+            takefocus=0,
+            cursor="arrow",
+            padx=2,
+            pady=8,
+            spacing1=3,
+            spacing3=3,
+        )
+        self.gutter_clean.config(state="disabled")
+        if self.show_line_numbers:
+            self.gutter_clean.pack(side="left", fill="y", padx=(0, 2))
+
+        self.txt_dialogue = tk.Text(
+            self.clean_editor_row,
             wrap="word",
             height=7,
             font=(d_fam, d_sz),
@@ -2714,7 +2899,7 @@ class MisoraApp(tk.Tk):
             bd=1,
             relief="solid",
         )
-        self.txt_dialogue.pack(fill="both", expand=True)
+        self.txt_dialogue.pack(side="left", fill="both", expand=True)
         self._configure_editor_rich_tags(self.txt_dialogue, d_fam, d_sz)
         self.txt_dialogue.bind("<KeyRelease>", lambda e: self._on_dialogue_edited())
         self.txt_dialogue.bind("<MouseWheel>", self._on_gd_mousewheel)
@@ -2725,11 +2910,53 @@ class MisoraApp(tk.Tk):
         # VIEW 2: Continuous Script Dialog Stream
         self.continuous_wrap = self._tag_role(tk.Frame(top_view, bg=t["bg_panel"]), "panel")
 
-        cont_scroll_y = tk.Scrollbar(self.continuous_wrap, orient="vertical")
+        # Horizontal Column Ruler for Continuous View (#12)
+        self.ruler_cont = tk.Text(
+            self.continuous_wrap,
+            height=1,
+            font=("Consolas", max(8, d_sz - 2)),
+            bg=gutter_bg,
+            fg=gutter_fg,
+            bd=0,
+            relief="flat",
+            wrap="none",
+            takefocus=0,
+            cursor="arrow",
+        )
+        self.ruler_cont.insert("1.0", "      ....5...10...15...20...25...30...35...40...45...50...55...60...65...70...75...80")
+        self.ruler_cont.config(state="disabled")
+        if self.show_column_ruler:
+            self.ruler_cont.pack(side="top", fill="x", padx=8, pady=(2, 2))
+
+        self.cont_editor_row = tk.Frame(self.continuous_wrap, bg=t["bg_panel"])
+        self.cont_editor_row.pack(fill="both", expand=True, padx=8, pady=(0, 6))
+
+        cont_scroll_y = tk.Scrollbar(self.cont_editor_row, orient="vertical")
         cont_scroll_y.pack(side="right", fill="y")
 
+        # Vertical Line Numbers Gutter for Continuous View (#12)
+        self.gutter_cont = tk.Text(
+            self.cont_editor_row,
+            width=4,
+            font=("Consolas", max(8, d_sz - 1)),
+            bg=gutter_bg,
+            fg=gutter_fg,
+            bd=0,
+            relief="flat",
+            wrap="none",
+            takefocus=0,
+            cursor="arrow",
+            padx=2,
+            pady=10,
+            spacing1=3,
+            spacing3=4,
+        )
+        self.gutter_cont.config(state="disabled")
+        if self.show_line_numbers:
+            self.gutter_cont.pack(side="left", fill="y", padx=(0, 2))
+
         self.txt_continuous = tk.Text(
-            self.continuous_wrap,
+            self.cont_editor_row,
             wrap="word",
             undo=False,
             font=(d_fam, d_sz),
@@ -2744,10 +2971,10 @@ class MisoraApp(tk.Tk):
             spacing3=4,
             bd=1,
             relief="solid",
-            yscrollcommand=cont_scroll_y.set,
+            yscrollcommand=lambda *args: (cont_scroll_y.set(*args), self._sync_continuous_gutter_scroll(*args)),
         )
         self.txt_continuous.pack(side="left", fill="both", expand=True)
-        cont_scroll_y.config(command=self.txt_continuous.yview)
+        cont_scroll_y.config(command=self._on_continuous_vscroll)
 
         self.txt_continuous.tag_configure(
             "cont_divider",
@@ -2801,6 +3028,8 @@ class MisoraApp(tk.Tk):
         self.txt_continuous.bind("<ButtonRelease-1>", self._on_continuous_cursor_moved)
         self.txt_continuous.bind("<Key>", self._on_continuous_key_guard)
         self.txt_continuous.bind("<KeyRelease>", self._on_continuous_key_release)
+        self.txt_continuous.bind("<<Copy>>", self._on_continuous_copy)
+        self.txt_continuous.bind("<Control-c>", self._on_continuous_copy)
         self.txt_continuous.bind("<<Paste>>", self._on_continuous_paste_guard)
         self.txt_continuous.bind("<<Cut>>", self._on_continuous_cut_guard)
         self.txt_continuous.bind("<Control-b>", lambda e: self._shortcut_wrap("[b]", "[/b]"))
@@ -2845,118 +3074,8 @@ class MisoraApp(tk.Tk):
         raw_scroll_x.config(command=self.txt_raw.xview)
 
     # -------------------------------------------------------------------------
-    # Embedded Debug Console Panel (#14)
+    # Debug File Logging & Diagnostics (#14)
     # -------------------------------------------------------------------------
-    def _build_debug_console(self) -> None:
-        t = self.theme
-        self.console_panel = self._tag_role(
-            tk.Frame(self.outer_v_paned, bg=t["bg_panel"], bd=1, relief="solid"),
-            "panel",
-        )
-
-        hdr = self._tag_role(tk.Frame(self.console_panel, bg=t["bg_panel"]), "panel")
-        hdr.pack(fill="x", padx=8, pady=(4, 2))
-
-        self._tag_role(
-            tk.Label(hdr, text="DEBUG CONSOLE", font=("Segoe UI", 9, "bold"), bg=t["bg_panel"], fg=t["misora_pink"]),
-            "label_accent",
-        ).pack(side="left")
-
-        ttk.Button(hdr, text="✕", style="Small.TButton", command=lambda: self._set_console_visible(False, save=True)).pack(side="right", padx=(4, 0))
-        ttk.Button(hdr, text="Copy", style="Small.TButton", command=self._on_copy_console).pack(side="right", padx=2)
-        ttk.Button(hdr, text="Clear", style="Small.TButton", command=self._on_clear_console).pack(side="right", padx=2)
-
-        cb_auto = self._tag_role(
-            tk.Checkbutton(
-                hdr,
-                text="Auto-scroll",
-                variable=self.var_console_autoscroll,
-                bg=t["bg_panel"],
-                fg=t["fg_text"],
-                selectcolor=t["bg_dark"],
-                activebackground=t["bg_panel"],
-            ),
-            "check_panel",
-        )
-        cb_auto.pack(side="right", padx=6)
-
-        cb_file = self._tag_role(
-            tk.Checkbutton(
-                hdr,
-                text="Log to File",
-                variable=self.var_log_to_file,
-                command=self._on_debug_settings_changed,
-                bg=t["bg_panel"],
-                fg=t["fg_text"],
-                selectcolor=t["bg_dark"],
-                activebackground=t["bg_panel"],
-            ),
-            "check_panel",
-        )
-        cb_file.pack(side="right", padx=6)
-
-        body = self._tag_role(tk.Frame(self.console_panel, bg=t["bg_editor"], bd=1, relief="solid"), "editor_box")
-        body.pack(fill="both", expand=True, padx=6, pady=(0, 6))
-
-        y_scr = tk.Scrollbar(body, orient="vertical")
-        y_scr.pack(side="right", fill="y")
-        x_scr = tk.Scrollbar(body, orient="horizontal")
-        x_scr.pack(side="bottom", fill="x")
-
-        self.txt_console = tk.Text(
-            body,
-            wrap="none",
-            height=8,
-            font=("Consolas", 9),
-            bg=t["bg_editor"],
-            fg=t["fg_text"],
-            padx=6,
-            pady=4,
-            bd=0,
-            relief="flat",
-            state="disabled",
-            yscrollcommand=y_scr.set,
-            xscrollcommand=x_scr.set,
-        )
-        self.txt_console.pack(side="left", fill="both", expand=True)
-        y_scr.config(command=self.txt_console.yview)
-        x_scr.config(command=self.txt_console.xview)
-        self._apply_console_theme()
-
-    def _apply_console_theme(self) -> None:
-        t = self.theme
-        editor_fg = best_contrast_fg(t["bg_editor"], t["fg_text"], "#ffffff")
-        self.txt_console.configure(bg=t["bg_editor"], fg=editor_fg)
-        self.txt_console.tag_configure("lvl_Debug", foreground=t["fg_muted"])
-        self.txt_console.tag_configure("lvl_Info", foreground=editor_fg)
-        self.txt_console.tag_configure("lvl_Warning", foreground=t["accent_yellow"], font=("Consolas", 9, "bold"))
-        self.txt_console.tag_configure(
-            "lvl_Error",
-            foreground="#d93848" if not self._is_dark_color(t["bg_editor"]) else "#ff6b7a",
-            font=("Consolas", 9, "bold"),
-        )
-
-    def _set_console_visible(self, visible: bool, save: bool = True) -> None:
-        self._console_visible = bool(visible)
-        self.var_console_visible.set(self._console_visible)
-        panes = self.outer_v_paned.panes()
-        panel_str = str(self.console_panel)
-        if self._console_visible:
-            if panel_str not in panes:
-                self.outer_v_paned.add(self.console_panel, minsize=100, height=170, stretch="never")
-                self._rerender_console_from_history()
-        else:
-            if panel_str in panes:
-                self.outer_v_paned.forget(self.console_panel)
-        if save:
-            self._save_user_prefs(silent=True)
-
-    def _on_toggle_console_menu(self) -> None:
-        self._set_console_visible(self.var_console_visible.get(), save=True)
-
-    def _toggle_console_shortcut(self) -> None:
-        self._set_console_visible(not self._console_visible, save=True)
-
     def _on_debug_settings_changed(self) -> None:
         cats = {cat: (True if cat == ALWAYS_ON_CATEGORY else bool(var.get())) for cat, var in self.var_log_categories.items()}
         self.logger.configure(
@@ -2993,43 +3112,123 @@ class MisoraApp(tk.Tk):
     def _on_clear_debug_log_file(self) -> None:
         if self.logger.clear_log_file():
             self.logger.info("UI / Theme / Config", f"Cleared debug log file: {DEBUG_LOG_PATH}")
+            self.show_toast("✓ Cleared debug log file")
 
-    def _on_clear_console(self) -> None:
-        self.logger.clear_history()
-        self.txt_console.config(state="normal")
-        self.txt_console.delete("1.0", tk.END)
-        self.txt_console.config(state="disabled")
+    # -------------------------------------------------------------------------
+    # Speaker Attributes & Actor Quick Assignment
+    # -------------------------------------------------------------------------
+    def _on_speaker_dropdown_clicked(self) -> None:
+        """Display a popup menu of actors in the current story for quick speaker assignment."""
+        if not self.current_doc or not self.current_doc.boxes:
+            return
+        actors = self.current_doc.actors()
+        if not actors:
+            return
+        menu = tk.Menu(self, tearoff=0)
+        for act in actors:
+            menu.add_command(
+                label=act,
+                command=lambda a=act: self._assign_speaker_to_current_box(a),
+            )
+        try:
+            x = self.btn_speaker_dropdown.winfo_rootx()
+            y = self.btn_speaker_dropdown.winfo_rooty() + self.btn_speaker_dropdown.winfo_height()
+            menu.tk_popup(x, y)
+        finally:
+            menu.grab_release()
 
-    def _on_copy_console(self) -> None:
-        content = self.txt_console.get("1.0", "end-1c")
-        self.clipboard_clear()
-        self.clipboard_append(content)
-        self.lbl_status.config(text="Copied Debug Console output to clipboard.")
+    def _assign_speaker_to_current_box(self, new_speaker: str) -> None:
+        self.speaker_var.set(new_speaker)
+        self._on_speaker_edited()
+        self.show_toast(f"Assigned speaker: {new_speaker}")
 
-    def _rerender_console_from_history(self) -> None:
-        entries = self.logger.get_history()
-        self.logger.drain_ui_entries()
-        self.txt_console.config(state="normal")
-        self.txt_console.delete("1.0", tk.END)
-        for entry in entries:
-            self.txt_console.insert(tk.END, entry.format_line() + "\n", (f"lvl_{entry.level}",))
-        if self.var_console_autoscroll.get():
-            self.txt_console.see(tk.END)
-        self.txt_console.config(state="disabled")
+    # -------------------------------------------------------------------------
+    # Line Numbers Gutter & Column Ruler Synchronization (#12)
+    # -------------------------------------------------------------------------
+    def _on_toggle_line_numbers(self) -> None:
+        visible = bool(self.var_show_line_numbers.get())
+        self.show_line_numbers = visible
+        if hasattr(self, "gutter_clean"):
+            if visible:
+                self.gutter_clean.pack(side="left", fill="y", padx=(0, 2), before=self.txt_dialogue)
+            else:
+                self.gutter_clean.pack_forget()
+        if hasattr(self, "gutter_cont"):
+            if visible:
+                self.gutter_cont.pack(side="left", fill="y", padx=(0, 2), before=self.txt_continuous)
+            else:
+                self.gutter_cont.pack_forget()
+        self._save_user_prefs(silent=True)
 
-    def _flush_log_console(self) -> None:
-        entries = self.logger.drain_ui_entries()
-        if entries and self._console_visible and hasattr(self, "txt_console"):
-            self.txt_console.config(state="normal")
-            for entry in entries:
-                self.txt_console.insert(tk.END, entry.format_line() + "\n", (f"lvl_{entry.level}",))
-            line_count = int(self.txt_console.index("end-1c").split(".")[0])
-            if line_count > 2500:
-                self.txt_console.delete("1.0", f"{line_count - 2000}.0")
-            if self.var_console_autoscroll.get():
-                self.txt_console.see(tk.END)
-            self.txt_console.config(state="disabled")
-        self.after(120, self._flush_log_console)
+    def _on_toggle_column_ruler(self) -> None:
+        visible = bool(self.var_show_column_ruler.get())
+        self.show_column_ruler = visible
+        if hasattr(self, "ruler_clean"):
+            if visible:
+                self.ruler_clean.pack(side="top", fill="x", pady=(0, 2), before=self.clean_editor_row)
+            else:
+                self.ruler_clean.pack_forget()
+        if hasattr(self, "ruler_cont"):
+            if visible:
+                self.ruler_cont.pack(side="top", fill="x", padx=8, pady=(2, 2), before=self.cont_editor_row)
+            else:
+                self.ruler_cont.pack_forget()
+        self._save_user_prefs(silent=True)
+
+    def _update_gutter_clean(self) -> None:
+        """Update line numbers in clean dialogue view gutter."""
+        if not hasattr(self, "gutter_clean"):
+            return
+        try:
+            total_lines = int(self.txt_dialogue.index("end-1c").split(".")[0])
+            numbers = "\n".join(f"{i:>2} " for i in range(1, max(1, total_lines) + 1))
+            self.gutter_clean.config(state="normal")
+            self.gutter_clean.delete("1.0", tk.END)
+            self.gutter_clean.insert("1.0", numbers)
+            self.gutter_clean.config(state="disabled")
+        except Exception:
+            pass
+
+    def _update_gutter_cont(self, line_num_list: List[str]) -> None:
+        """Update repeating per-box line numbers in continuous view gutter."""
+        if not hasattr(self, "gutter_cont"):
+            return
+        try:
+            self.gutter_cont.config(state="normal")
+            self.gutter_cont.delete("1.0", tk.END)
+            self.gutter_cont.insert("1.0", "\n".join(line_num_list))
+            self.gutter_cont.config(state="disabled")
+        except Exception:
+            pass
+
+    def _sync_continuous_gutter_scroll(self, *args) -> None:
+        """Keep line number gutter perfectly scrolled in lockstep with continuous text."""
+        if hasattr(self, "gutter_cont") and self.show_line_numbers:
+            try:
+                self.gutter_cont.yview_moveto(args[0])
+            except Exception:
+                pass
+
+    def _on_continuous_vscroll(self, *args) -> None:
+        """Handle vertical scrollbar motion for both text and gutter."""
+        try:
+            self.txt_continuous.yview(*args)
+            if hasattr(self, "gutter_cont") and self.show_line_numbers:
+                self.gutter_cont.yview(*args)
+        except Exception:
+            pass
+
+    def _highlight_secret_whitespace(self, text_widget: tk.Text) -> None:
+        """Detect and highlight unintended trailing whitespaces or blank tabs/spaces."""
+        try:
+            text_widget.tag_remove("secret_whitespace", "1.0", tk.END)
+            content = text_widget.get("1.0", tk.END)
+            for m in re.finditer(r"[ \t]+(?=\n|$)", content):
+                s_idx = f"1.0 + {m.start()}c"
+                e_idx = f"1.0 + {m.end()}c"
+                text_widget.tag_add("secret_whitespace", s_idx, e_idx)
+        except Exception:
+            pass
 
     # -------------------------------------------------------------------------
     # NGUI Attributes Ribbon Actions & Compiled Preview Compiler
@@ -3274,8 +3473,18 @@ class MisoraApp(tk.Tk):
             text="✕",
             style="Small.TButton",
             command=self._close_side_drawer,
+            width=2,
         )
-        btn_close_drawer.pack(side="right")
+        btn_close_drawer.pack(side="right", padx=(2, 0))
+
+        self.btn_drawer_pin = ttk.Button(
+            drawer_top,
+            text="📌",
+            style="Small.TButton",
+            command=self._toggle_side_drawer_pin,
+            width=3,
+        )
+        self.btn_drawer_pin.pack(side="right", padx=(2, 2))
 
         self.tab_customize_frame = self._tag_role(tk.Frame(self.side_drawer, bg=t["bg_panel"]), "panel")
         self._build_customize_tab(self.tab_customize_frame)
@@ -3949,11 +4158,17 @@ class MisoraApp(tk.Tk):
         if self.var_continuous_view.get():
             self.gd_scroll_wrap.pack_forget()
             self.continuous_wrap.pack(fill="both", expand=True, padx=8, pady=(0, 6))
-            self.lbl_gd_title.config(text="GAME DISPLAY VIEW (Continuous Dialog Stream)")
+            self.lbl_gd_title.config(text="GAME VIEW (Continuous Stream)")
         else:
+            # Sync active box from cursor position in continuous view (#11)
+            cur_box = self._find_continuous_box_at_index("insert")
+            if cur_box is None:
+                cur_box = self._nearest_continuous_box_to_index("insert")
+            if cur_box is not None and self.current_doc and 0 <= cur_box < len(self.current_doc.boxes):
+                self.current_box_idx = cur_box
             self.continuous_wrap.pack_forget()
             self.gd_scroll_wrap.pack(fill="both", expand=True, padx=4, pady=(0, 4))
-            self.lbl_gd_title.config(text="GAME DISPLAY VIEW (Clean Dialogue)")
+            self.lbl_gd_title.config(text="GAME VIEW (Clean Dialogue)")
 
         self._update_views()
 
@@ -4017,6 +4232,11 @@ class MisoraApp(tk.Tk):
         self.bind("<F12>", lambda e: self._toggle_console_shortcut())
         self.bind("<Alt-Left>", lambda e: self.on_prev_box())
         self.bind("<Alt-Right>", lambda e: self.on_next_box())
+        self.bind("<Control-t>", lambda e: self.on_open_translator_assistant())
+        self.bind("<Control-T>", lambda e: self.on_copy_ai_prompt())
+        self.bind("<Control-Shift-T>", lambda e: self.on_copy_ai_prompt())
+        self.bind("<Control-Shift-t>", lambda e: self.on_copy_ai_prompt())
+        self.bind("<F8>", lambda e: self.on_translate_current_box())
 
     def _toggle_continuous_shortcut(self) -> None:
         self.var_continuous_view.set(not self.var_continuous_view.get())
@@ -4195,10 +4415,14 @@ class MisoraApp(tk.Tk):
                 self.txt_dialogue.insert("1.0", box.clean_text)
                 self._highlight_ngui_tags()
                 self._highlight_dialogue_matches()
+                self._highlight_secret_whitespace(self.txt_dialogue)
+            self._update_gutter_clean()
             self.gd_canvas.yview_moveto(0.0)
             self._auto_resize_dialogue_box()
 
         self._update_raw_view()
+        if hasattr(self, "_translator_dialog") and self._translator_dialog and self._translator_dialog.winfo_exists():
+            self._translator_dialog.refresh_box()
 
     def _update_raw_view(self) -> None:
         """Render Raw AST View and highlight records associated with current_box_idx."""
@@ -4228,7 +4452,7 @@ class MisoraApp(tk.Tk):
             self.txt_raw.see(f"{first_active_line}.0")
 
     def _render_continuous_view(self) -> None:
-        """Render all dialogue boxes sequentially with dividers, badges, and editable spans."""
+        """Render all dialogue boxes sequentially with dividers, badges, repeating line numbers, and editable spans."""
         compiled = self.var_preview_compiled.get()
         self._suppress_continuous_events = True
         try:
@@ -4240,15 +4464,21 @@ class MisoraApp(tk.Tk):
             self.txt_continuous.delete("1.0", tk.END)
 
             if not self.current_doc or not self.current_doc.boxes:
+                if hasattr(self, "gutter_cont"):
+                    self._update_gutter_cont([])
                 return
 
+            gutter_lines: List[str] = []
             for i, box in enumerate(self.current_doc.boxes):
                 if i > 0:
                     self.txt_continuous.insert(tk.END, "\n")
-                    self.txt_continuous.insert(tk.END, "─" * 68 + "\n", ("cont_divider",))
+                    gutter_lines.append("   ")
+                    # Clear prominent box demarcation (#13)
+                    self.txt_continuous.insert(tk.END, "━" * 72 + "\n", ("cont_divider",))
+                    gutter_lines.append(" ─ ")
 
                 hdr_start = self.txt_continuous.index("end-1c")
-                badge = f"[Box #{i + 1:03d}]"
+                badge = f"◆ [BOX #{i + 1:03d}]"
                 speaker_disp = box.speaker if box.speaker else "(Narration)"
                 speaker_tag = "cont_speaker" if box.speaker else "cont_narrator"
                 voice_disp = f"   ♪ {box.voice_cue}" if box.voice_cue else ""
@@ -4258,6 +4488,7 @@ class MisoraApp(tk.Tk):
                 if voice_disp:
                     self.txt_continuous.insert(tk.END, voice_disp, ("cont_voice",))
                 self.txt_continuous.insert(tk.END, "\n")
+                gutter_lines.append(" ◆ ")
                 hdr_end = self.txt_continuous.index("end-1c")
                 self._cont_header_spans[i] = (hdr_start, hdr_end)
 
@@ -4273,6 +4504,11 @@ class MisoraApp(tk.Tk):
                 else:
                     self.txt_continuous.insert(tk.END, box.clean_text, ("cont_body",))
 
+                # Track repeating line numbers per box (#12)
+                lines_in_box = max(1, box.clean_text.count("\n") + 1)
+                for ln in range(1, lines_in_box + 1):
+                    gutter_lines.append(f"{ln:>2} ")
+
                 body_end = self.txt_continuous.index("end-1c")
                 self.txt_continuous.mark_set(f"box_end_{i}", body_end)
                 self.txt_continuous.mark_gravity(f"box_end_{i}", tk.LEFT)
@@ -4280,11 +4516,14 @@ class MisoraApp(tk.Tk):
                 self.txt_continuous.insert(tk.END, "\n")
                 self.txt_continuous.mark_gravity(f"box_end_{i}", tk.RIGHT)
 
+            self._update_gutter_cont(gutter_lines)
+
             if compiled:
                 self.txt_continuous.config(state="disabled")
             else:
                 self._highlight_ngui_tags()
                 self._highlight_continuous_matches()
+                self._highlight_secret_whitespace(self.txt_continuous)
         finally:
             self._suppress_continuous_events = False
 
@@ -4354,14 +4593,13 @@ class MisoraApp(tk.Tk):
         if not self.current_doc or not self.current_doc.boxes:
             return 0
         marks = set(self.txt_continuous.mark_names())
-        chosen = 0
-        for i in range(len(self.current_doc.boxes)):
-            s_mark = f"box_start_{i}"
-            if s_mark in marks:
-                if self.txt_continuous.compare(tk_index, "<=", s_mark):
+        total = len(self.current_doc.boxes)
+        for i in range(total):
+            e_mark = f"box_end_{i}"
+            if e_mark in marks:
+                if self.txt_continuous.compare(tk_index, "<=", e_mark):
                     return i
-                chosen = i
-        return chosen
+        return max(0, total - 1)
 
     def _on_continuous_cursor_moved(self, event: Optional[tk.Event] = None) -> None:
         """Sync active box indicator, speaker bar, and Raw AST View when clicking in Continuous View."""
@@ -4395,19 +4633,53 @@ class MisoraApp(tk.Tk):
             "Caps_Lock", "Num_Lock", "Scroll_Lock", "Escape",
             "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12",
         }
+
+        # Up / Down smooth box navigation (#14)
+        if keysym == "Up":
+            box_idx = self._find_continuous_box_at_index("insert")
+            if box_idx is not None and box_idx > 0:
+                s_mark = f"box_start_{box_idx}"
+                if self.txt_continuous.compare("insert linestart", "==", f"{s_mark} linestart"):
+                    prev_end = f"box_end_{box_idx - 1}"
+                    if prev_end in self.txt_continuous.mark_names():
+                        self.txt_continuous.mark_set("insert", prev_end)
+                        self.txt_continuous.see(prev_end)
+                        self.after_idle(self._on_continuous_cursor_moved)
+                        return "break"
+        elif keysym == "Down":
+            box_idx = self._find_continuous_box_at_index("insert")
+            if box_idx is not None and box_idx < len(self.current_doc.boxes) - 1:
+                e_mark = f"box_end_{box_idx}"
+                if self.txt_continuous.compare("insert lineend", "==", f"{e_mark} lineend"):
+                    next_start = f"box_start_{box_idx + 1}"
+                    if next_start in self.txt_continuous.mark_names():
+                        self.txt_continuous.mark_set("insert", next_start)
+                        self.txt_continuous.see(next_start)
+                        self.after_idle(self._on_continuous_cursor_moved)
+                        return "break"
+
         if keysym in nav_keys:
             self.after_idle(self._on_continuous_cursor_moved)
             return None
 
-        if ctrl and keysym.lower() in {"c", "a", "f", "o", "s", "q", "r", "p", "b", "i", "u"}:
+        if ctrl and keysym.lower() in {"c", "a", "f", "o", "s", "q", "r", "p", "b", "i", "u", "t"}:
             return None
 
         if ctrl and keysym.lower() in {"z", "y"}:
             return "break"
 
+        # Check for full selection delete (Keep skeleton only prompt)
         try:
             sel_first = self.txt_continuous.index("sel.first")
             sel_last = self.txt_continuous.index("sel.last")
+            is_full_select = (
+                self.txt_continuous.compare(sel_first, "==", "1.0")
+                and self.txt_continuous.compare(sel_last, ">=", "end-1c")
+            )
+            if is_full_select and keysym in ("Delete", "BackSpace"):
+                self.on_clear_dialogue_skeleton()
+                return "break"
+
             b1 = self._find_continuous_box_at_index(sel_first)
             b2 = self._find_continuous_box_at_index(sel_last)
             if b1 is None or b1 != b2:
@@ -4433,10 +4705,91 @@ class MisoraApp(tk.Tk):
 
         return None
 
+    def _on_continuous_copy(self, _event: Optional[tk.Event] = None) -> Optional[str]:
+        """Format multi-box continuous selection with placeholder delimiters for cross-box paste (#17)."""
+        if not self.current_doc or not self.current_doc.boxes:
+            return None
+        try:
+            sel_s = self.txt_continuous.index("sel.first")
+            sel_e = self.txt_continuous.index("sel.last")
+        except tk.TclError:
+            return None
+
+        b_start = self._find_continuous_box_at_index(sel_s)
+        b_end = self._find_continuous_box_at_index(sel_e)
+        if b_start is None:
+            b_start = self._nearest_continuous_box_to_index(sel_s)
+        if b_end is None:
+            b_end = self._nearest_continuous_box_to_index(sel_e)
+
+        if b_start is not None and b_end is not None and b_start != b_end:
+            blocks = []
+            for b_idx in range(min(b_start, b_end), max(b_start, b_end) + 1):
+                box = self.current_doc.boxes[b_idx]
+                s_mark = f"box_start_{b_idx}"
+                e_mark = f"box_end_{b_idx}"
+                if s_mark in self.txt_continuous.mark_names() and e_mark in self.txt_continuous.mark_names():
+                    seg_s = s_mark if self.txt_continuous.compare(s_mark, ">", sel_s) else sel_s
+                    seg_e = e_mark if self.txt_continuous.compare(e_mark, "<", sel_e) else sel_e
+                    if self.txt_continuous.compare(seg_s, "<", seg_e):
+                        b_text = self.txt_continuous.get(seg_s, seg_e).strip()
+                        blocks.append(f"=== [BOX:{b_idx}|Speaker:{box.speaker}] ===\n{b_text}")
+            if blocks:
+                formatted = "\n\n".join(blocks) + "\n"
+                self.clipboard_clear()
+                self.clipboard_append(formatted)
+                self.show_toast(f"📋 Copied dialogue across {len(blocks)} boxes (#17)")
+                return "break"
+        return None
+
     def _on_continuous_paste_guard(self, _event: tk.Event) -> Optional[str]:
-        """Ensure paste operations inside Continuous View only target a single box body."""
+        """Ensure paste operations inside Continuous View handle single-box and multi-box placeholder paste (#17)."""
         if self.var_preview_compiled.get() or not self.current_doc or not self.current_doc.boxes:
             return "break"
+        try:
+            clip = self.clipboard_get()
+        except tk.TclError:
+            return "break"
+
+        # Check for multi-box delimiter format (#17)
+        if "=== [BOX:" in clip or "[BOX:" in clip:
+            pattern = re.compile(
+                r"(?:=== )?\[BOX:(\d+)(?:\|Speaker:([^\]]*))?\]\s*(?:===)?\s*\n(.*?)(?=\n(?:=== )?\[BOX:|\Z)",
+                re.DOTALL
+            )
+            matches = list(pattern.finditer(clip))
+            if matches:
+                cur_target = self._find_continuous_box_at_index("insert")
+                if cur_target is None:
+                    cur_target = self._nearest_continuous_box_to_index("insert")
+                self.undo_journal.begin_batch(f"Multi-box paste ({len(matches)} boxes)")
+                count = 0
+                for idx, m in enumerate(matches):
+                    target_box_idx = cur_target + idx
+                    if target_box_idx >= len(self.current_doc.boxes):
+                        break
+                    new_sp = m.group(2) if m.group(2) else None
+                    new_text = m.group(3).strip()
+                    old_box = self.current_doc.boxes[target_box_idx]
+                    self.undo_journal.record(
+                        BoxEditDelta(
+                            box_index=target_box_idx,
+                            old_speaker=old_box.speaker,
+                            new_speaker=new_sp if new_sp is not None else old_box.speaker,
+                            old_text=old_box.clean_text,
+                            new_text=new_text,
+                            file_path=str(self.current_file_path) if self.current_file_path else "",
+                        )
+                    )
+                    self.current_doc.inject_box(target_box_idx, new_sp, new_text)
+                    self._modified_boxes.add(target_box_idx)
+                    count += 1
+                self.undo_journal.end_batch()
+                self.is_dirty = True
+                self._update_views()
+                self.show_toast(f"✓ Pasted dialogue across {count} boxes (#17)")
+                return "break"
+
         try:
             sel_first = self.txt_continuous.index("sel.first")
             sel_last = self.txt_continuous.index("sel.last")
@@ -6078,6 +6431,1089 @@ class MisoraApp(tk.Tk):
 
         ttk.Button(btn_bar, text="Cancel", style="TButton", command=dlg.destroy).pack(side="right", padx=4)
         ttk.Button(btn_bar, text="Save & Apply", style="Pink.TButton", command=_save_and_close).pack(side="right", padx=4)
+
+    # -------------------------------------------------------------------------
+    # Side Drawer Pinning (#6)
+    # -------------------------------------------------------------------------
+    def _toggle_side_drawer_pin(self) -> None:
+        self._side_drawer_pinned = not getattr(self, "_side_drawer_pinned", False)
+        pin_icon = "📌" if self._side_drawer_pinned else "📍"
+        if hasattr(self, "btn_drawer_pin"):
+            self.btn_drawer_pin.config(text=pin_icon)
+        self.show_toast(f"Side drawer {'pinned' if self._side_drawer_pinned else 'unpinned'}")
+
+    # -------------------------------------------------------------------------
+    # Translator Suite Callbacks & Handlers (#4A, #16, #17)
+    # -------------------------------------------------------------------------
+    def on_open_mtl_settings(self) -> None:
+        """Open the Machine Translation sources & configuration dialog."""
+        MTLSettingsDialog(self)
+
+    def on_open_ai_prompt_settings(self) -> None:
+        """Open the AI / LLM translation prompt header and exporter dialog."""
+        AIPromptSettingsDialog(self)
+
+    def on_open_translator_assistant(self) -> None:
+        """Open or focus the floating Translator Assistant workspace window."""
+        if hasattr(self, "_translator_dialog") and self._translator_dialog and self._translator_dialog.winfo_exists():
+            self._translator_dialog.lift()
+            self._translator_dialog.focus_force()
+            self._translator_dialog.refresh_box()
+            return
+        self._translator_dialog = TranslatorAssistantDialog(self)
+
+    def on_translate_current_box(self) -> None:
+        """Translate the dialogue in the active box using configured active engine (F8)."""
+        if not self.current_doc or not self.current_doc.boxes:
+            self.show_toast("No story document loaded")
+            return
+        b_idx = self.current_box_idx
+        if b_idx < 0 or b_idx >= len(self.current_doc.boxes):
+            return
+        box = self.current_doc.boxes[b_idx]
+        orig_text = box.clean_text.strip()
+        if not orig_text:
+            self.show_toast("Current box has no text to translate")
+            return
+
+        engine_name = self.mtl_config.active_engine
+        self.show_toast(f"Translating Box {b_idx + 1} with {engine_name}...")
+        self.lbl_status.config(text=f"Translating Box {b_idx + 1} with {engine_name}...")
+
+        def on_success(result: str):
+            def update_ui():
+                if not self.current_doc or b_idx >= len(self.current_doc.boxes):
+                    return
+                old_b = self.current_doc.boxes[b_idx]
+                self.undo_journal.record(
+                    BoxEditDelta(
+                        box_index=b_idx,
+                        old_speaker=old_b.speaker,
+                        new_speaker=old_b.speaker,
+                        old_text=old_b.clean_text,
+                        new_text=result,
+                        file_path=str(self.current_file_path) if self.current_file_path else "",
+                    )
+                )
+                self.current_doc.inject_box(b_idx, old_b.speaker, result)
+                self._modified_boxes.add(b_idx)
+                self.is_dirty = True
+                self._update_views()
+                self.show_toast(f"✓ Translated Box {b_idx + 1} via {engine_name}")
+                self.lbl_status.config(text=f"Box {b_idx + 1} translated via {engine_name}")
+            self.after_idle(update_ui)
+
+        def on_error(err: str):
+            def show_err():
+                self.logger.error("MTL", f"Translation failed for Box {b_idx + 1}: {err}")
+                self.show_toast(f"❌ Translation failed: {err}")
+                self.lbl_status.config(text=f"Translation failed: {err}")
+            self.after_idle(show_err)
+
+        translate_async(
+            orig_text,
+            self.mtl_config,
+            on_success=on_success,
+            on_error=on_error,
+            xuat_cache=getattr(self, "xuat_entries", None),
+        )
+
+    def on_batch_translate(self) -> None:
+        """Open automated batch translation dialog."""
+        if not self.current_doc or not self.current_doc.boxes:
+            messagebox.showwarning("No Story Open", "Open a story bundle or text file first.")
+            return
+        BatchTranslateDialog(self)
+
+    def on_copy_ai_prompt(self) -> None:
+        """Export the entire active story with AI system rules and delimiters to clipboard."""
+        if not self.current_doc or not self.current_doc.boxes:
+            self.show_toast("No story document loaded")
+            return
+
+        lines: List[str] = []
+        if getattr(self.mtl_config, "ai_prompt_include_header", True):
+            hdr = self.mtl_config.llm_system_prompt.strip()
+            if hdr:
+                lines.append(hdr)
+                lines.append("")
+            lines.append("=" * 60)
+            lines.append("TRANSLATION INSTRUCTIONS & RULES:")
+            lines.append("1. Maintain character personalities, tone, and visual novel style.")
+            lines.append("2. Strictly preserve all delimiters: === [BOX:<index>|Speaker:<name>] ===")
+            lines.append("3. Strictly preserve NGUI tags: [b], [i], [u], [s], [sub], [sup], [c]...[/c], [rub:ruby]base[/rub], [-]")
+            lines.append("4. Strictly preserve tokens: {playername}, {0}, and line breaks.")
+            lines.append("5. Output ONLY the translated story blocks in the exact format shown below.")
+            lines.append("=" * 60)
+            lines.append("")
+
+        include_speaker = getattr(self.mtl_config, "ai_prompt_include_speaker", True)
+        for i, box in enumerate(self.current_doc.boxes):
+            if include_speaker and box.speaker:
+                lines.append(f"=== [BOX:{i}|Speaker:{box.speaker}] ===")
+            else:
+                lines.append(f"=== [BOX:{i}] ===")
+            lines.append(box.clean_text)
+            lines.append("")
+
+        full_prompt = "\n".join(lines)
+        self.clipboard_clear()
+        self.clipboard_append(full_prompt)
+        box_count = len(self.current_doc.boxes)
+        self.show_toast(f"📋 Copied AI prompt for {box_count} boxes to clipboard")
+        self.lbl_status.config(text=f"Copied AI prompt ({box_count} boxes) to clipboard")
+
+    def on_apply_translation_clipboard(self) -> None:
+        """Apply multi-box translation from clipboard with excess placeholder protection (#17)."""
+        if not self.current_doc or not self.current_doc.boxes:
+            messagebox.showwarning("No Story Open", "Open a story bundle or text file first.")
+            return
+
+        try:
+            clip = self.clipboard_get()
+        except Exception:
+            messagebox.showwarning("Clipboard Empty", "Clipboard does not contain any readable text.")
+            return
+
+        pattern = re.compile(
+            r"(?:=== )?\[BOX:(\d+)(?:\|Speaker:([^\]]*))?\]\s*(?:===)?\s*\n(.*?)(?=\n(?:=== )?\[BOX:|\Z)",
+            re.DOTALL
+        )
+        matches = list(pattern.finditer(clip))
+        if matches:
+            total_boxes = len(self.current_doc.boxes)
+            if len(matches) > total_boxes:
+                excess = len(matches) - total_boxes
+                ans = messagebox.askyesno(
+                    "Excess Boxes Detected (#17)",
+                    f"The clipboard contains {len(matches)} translated boxes, but the open story only has {total_boxes} boxes.\n\n"
+                    f"Excess {excess} boxes will be ignored.\n\nDo you want to proceed?"
+                )
+                if not ans:
+                    return
+
+            self.undo_journal.begin_batch(f"Apply clipboard translation ({len(matches)} boxes)")
+            applied = 0
+            for m in matches:
+                b_idx = int(m.group(1))
+                if 0 <= b_idx < total_boxes:
+                    new_sp = m.group(2) if m.group(2) else None
+                    new_text = m.group(3).strip()
+                    old_box = self.current_doc.boxes[b_idx]
+                    self.undo_journal.record(
+                        BoxEditDelta(
+                            box_index=b_idx,
+                            old_speaker=old_box.speaker,
+                            new_speaker=new_sp if new_sp is not None else old_box.speaker,
+                            old_text=old_box.clean_text,
+                            new_text=new_text,
+                            file_path=str(self.current_file_path) if self.current_file_path else "",
+                        )
+                    )
+                    self.current_doc.inject_box(b_idx, new_sp, new_text)
+                    self._modified_boxes.add(b_idx)
+                    applied += 1
+            self.undo_journal.end_batch()
+            self.is_dirty = True
+            self._update_views()
+            self.show_toast(f"✓ Applied translation to {applied} boxes")
+            messagebox.showinfo("Translation Applied", f"Successfully applied translations to {applied} boxes.")
+        else:
+            ans = messagebox.askyesno(
+                "No Box Delimiters Found",
+                "Clipboard text does not contain '=== [BOX:x] ===' delimiters.\n\n"
+                "Do you want to paste the clipboard text directly into the current dialogue box?"
+            )
+            if ans:
+                self.apply_clean_text_edit(clip.strip())
+
+    def on_clear_dialogue_skeleton(self) -> None:
+        """Clear all dialogue text across all boxes, keeping speaker names and skeleton intact."""
+        if not self.current_doc or not self.current_doc.boxes:
+            self.show_toast("No story document loaded")
+            return
+        total = len(self.current_doc.boxes)
+        ans = messagebox.askyesno(
+            "Clear Dialogue Skeleton",
+            f"Clear all dialogue text across all {total} boxes?\n\n"
+            "This preserves speaker names, tags, and box timing while resetting dialogue to blank for a fresh translation pass.\n\n"
+            "This operation can be undone via Ctrl+Z."
+        )
+        if not ans:
+            return
+
+        self.undo_journal.begin_batch("Clear Dialogue Skeleton")
+        for i, box in enumerate(self.current_doc.boxes):
+            if box.clean_text:
+                self.undo_journal.record(
+                    BoxEditDelta(
+                        box_index=i,
+                        old_speaker=box.speaker,
+                        new_speaker=box.speaker,
+                        old_text=box.clean_text,
+                        new_text="",
+                        file_path=str(self.current_file_path) if self.current_file_path else "",
+                    )
+                )
+                self.current_doc.inject_box(i, box.speaker, "")
+                self._modified_boxes.add(i)
+        self.undo_journal.end_batch()
+        self.is_dirty = True
+        self._update_views()
+        self.show_toast(f"✓ Cleared dialogue skeleton for {total} boxes")
+        self.lbl_status.config(text=f"Cleared dialogue skeleton for {total} boxes.")
+
+    def on_register_unity3d_association(self) -> None:
+        """Register or verify .unity3d file association for current Windows user (#8)."""
+        bat_path = SCRIPT_DIR / "misora.bat"
+        if not bat_path.exists():
+            messagebox.showerror("Association Error", f"Cannot find {bat_path}")
+            return
+
+        cmd_str = f'"{bat_path}" "%1"'
+        try:
+            already_registered = False
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Classes\.unity3d") as key:
+                    val, _ = winreg.QueryValueEx(key, "")
+                    if val == "Misora.Unity3dBundle":
+                        already_registered = True
+            except OSError:
+                pass
+
+            if already_registered:
+                ans = messagebox.askyesno(
+                    ".unity3d File Association",
+                    ".unity3d files are currently associated with Misora.\n\nDo you want to unregister (remove) this association?"
+                )
+                if ans:
+                    try:
+                        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, r"Software\Classes\Misora.Unity3dBundle\shell\open\command")
+                        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, r"Software\Classes\Misora.Unity3dBundle\shell\open")
+                        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, r"Software\Classes\Misora.Unity3dBundle\shell")
+                        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, r"Software\Classes\Misora.Unity3dBundle")
+                        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, r"Software\Classes\.unity3d")
+                        self.show_toast("✓ Removed .unity3d file association")
+                        messagebox.showinfo("Success", ".unity3d association removed successfully.")
+                    except Exception as exc:
+                        self.logger.exception("Failed to remove .unity3d association:", exc)
+                        messagebox.showerror("Error", f"Failed to remove association:\n{exc}")
+                return
+
+            ans = messagebox.askyesno(
+                "Register .unity3d File Association",
+                f"Associate .unity3d story files with Misora for the current user?\n\nTarget launcher:\n{bat_path}\n\nThis does not require Administrator privileges."
+            )
+            if not ans:
+                return
+
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Classes\.unity3d") as k1:
+                winreg.SetValueEx(k1, "", 0, winreg.REG_SZ, "Misora.Unity3dBundle")
+
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Classes\Misora.Unity3dBundle") as k2:
+                winreg.SetValueEx(k2, "", 0, winreg.REG_SZ, "Unity3D Story Bundle (Misora)")
+
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Classes\Misora.Unity3dBundle\shell\open\command") as k3:
+                winreg.SetValueEx(k3, "", 0, winreg.REG_SZ, cmd_str)
+
+            try:
+                ctypes.windll.shell32.SHChangeNotify(0x08000000, 0, 0, 0)
+            except Exception:
+                pass
+
+            self.logger.info("Config", "Registered .unity3d file association for HKCU")
+            self.show_toast("✓ Registered .unity3d file association")
+            messagebox.showinfo("Success", ".unity3d story bundles are now associated with Misora!")
+        except Exception as exc:
+            self.logger.exception("Failed to register .unity3d association:", exc)
+            messagebox.showerror("Registration Failed", f"Could not write registry keys:\n{exc}")
+
+
+# =============================================================================
+# Translator Suite Dialogs (#4A, #16, #17)
+# =============================================================================
+class MTLSettingsDialog(tk.Toplevel):
+    """Configuration dialog for Machine Translation providers, API keys, endpoints and options."""
+    def __init__(self, parent: "MisoraApp"):
+        super().__init__(parent)
+        self.app = parent
+        self.title("Configure MTL Sources & Keys")
+        self.geometry("640x600")
+        self.minsize(580, 520)
+        self.transient(parent)
+        self.grab_set()
+
+        t = self.app.theme
+        self.configure(bg=t["bg_panel"])
+        apply_window_icon(self)
+
+        fg_panel = best_contrast_fg(t["bg_panel"])
+        fg_editor = best_contrast_fg(t["bg_editor"])
+
+        content = tk.Frame(self, bg=t["bg_panel"], padx=18, pady=12)
+        content.pack(fill="both", expand=True)
+
+        hdr = tk.Frame(content, bg=t["bg_panel"])
+        hdr.pack(fill="x", pady=(0, 10))
+        tk.Label(
+            hdr,
+            text="Machine Translation & External Providers",
+            font=("Segoe UI", 12, "bold"),
+            bg=t["bg_panel"],
+            fg=t["misora_pink"],
+        ).pack(side="left")
+
+        # Active Engine Row
+        r_eng = tk.Frame(content, bg=t["bg_panel"])
+        r_eng.pack(fill="x", pady=4)
+        tk.Label(r_eng, text="Active Engine:", font=("Segoe UI", 9, "bold"), bg=t["bg_panel"], fg=fg_panel, width=18, anchor="w").pack(side="left")
+        self.var_engine = tk.StringVar(value=self.app.mtl_config.active_engine)
+        cb_engine = ttk.Combobox(r_eng, textvariable=self.var_engine, values=MTL_ENGINES, state="readonly", width=22)
+        cb_engine.pack(side="left", padx=4)
+
+        # Languages Row
+        r_lang = tk.Frame(content, bg=t["bg_panel"])
+        r_lang.pack(fill="x", pady=4)
+        tk.Label(r_lang, text="Languages:", font=("Segoe UI", 9, "bold"), bg=t["bg_panel"], fg=fg_panel, width=18, anchor="w").pack(side="left")
+        tk.Label(r_lang, text="From:", bg=t["bg_panel"], fg=t["fg_muted"]).pack(side="left")
+        self.var_src = tk.StringVar(value=self.app.mtl_config.src_lang)
+        ent_src = tk.Entry(r_lang, textvariable=self.var_src, font=("Segoe UI", 9), bg=t["bg_editor"], fg=fg_editor, bd=1, relief="solid", width=6)
+        ent_src.pack(side="left", padx=(2, 10))
+        tk.Label(r_lang, text="To:", bg=t["bg_panel"], fg=t["fg_muted"]).pack(side="left")
+        self.var_tgt = tk.StringVar(value=self.app.mtl_config.tgt_lang)
+        ent_tgt = tk.Entry(r_lang, textvariable=self.var_tgt, font=("Segoe UI", 9), bg=t["bg_editor"], fg=fg_editor, bd=1, relief="solid", width=6)
+        ent_tgt.pack(side="left", padx=2)
+        tk.Label(r_lang, text="(e.g. ja -> en)", font=("Segoe UI", 8), bg=t["bg_panel"], fg=t["fg_muted"]).pack(side="left", padx=8)
+
+        ttk.Separator(content, orient="horizontal").pack(fill="x", pady=8)
+
+        # DeepL Section
+        sec_deepl = tk.LabelFrame(content, text="DeepL API Settings", font=("Segoe UI", 9, "bold"), bg=t["bg_panel"], fg=t["misora_pink"], padx=10, pady=8)
+        sec_deepl.pack(fill="x", pady=4)
+
+        r_dp1 = tk.Frame(sec_deepl, bg=t["bg_panel"])
+        r_dp1.pack(fill="x", pady=2)
+        tk.Label(r_dp1, text="Auth Key:", font=("Segoe UI", 9), bg=t["bg_panel"], fg=fg_panel, width=16, anchor="w").pack(side="left")
+        self.var_deepl_key = tk.StringVar(value=self.app.mtl_config.deepl_api_key)
+        self.ent_deepl_key = tk.Entry(r_dp1, textvariable=self.var_deepl_key, font=("Segoe UI", 9), bg=t["bg_editor"], fg=fg_editor, bd=1, relief="solid", show="*")
+        self.ent_deepl_key.pack(side="left", fill="x", expand=True, padx=(0, 4))
+        self.var_show_key = tk.BooleanVar(value=False)
+        def _toggle_key():
+            self.ent_deepl_key.config(show="" if self.var_show_key.get() else "*")
+        tk.Checkbutton(r_dp1, text="Show", variable=self.var_show_key, command=_toggle_key, bg=t["bg_panel"], fg=fg_panel, selectcolor=t["bg_dark"]).pack(side="left")
+
+        r_dp2 = tk.Frame(sec_deepl, bg=t["bg_panel"])
+        r_dp2.pack(fill="x", pady=2)
+        self.var_deepl_pro = tk.BooleanVar(value=self.app.mtl_config.deepl_use_pro)
+        tk.Checkbutton(
+            r_dp2,
+            text="Use DeepL Pro subscription endpoint (api.deepl.com instead of api-free.deepl.com)",
+            variable=self.var_deepl_pro,
+            bg=t["bg_panel"],
+            fg=fg_panel,
+            selectcolor=t["bg_dark"],
+        ).pack(side="left")
+
+        # Local MT Section
+        sec_local = tk.LabelFrame(content, text="Local MT / Sugoi / LibreTranslate", font=("Segoe UI", 9, "bold"), bg=t["bg_panel"], fg=t["misora_pink"], padx=10, pady=8)
+        sec_local.pack(fill="x", pady=4)
+
+        r_loc = tk.Frame(sec_local, bg=t["bg_panel"])
+        r_loc.pack(fill="x", pady=2)
+        tk.Label(r_loc, text="Server URL:", font=("Segoe UI", 9), bg=t["bg_panel"], fg=fg_panel, width=16, anchor="w").pack(side="left")
+        self.var_local_url = tk.StringVar(value=self.app.mtl_config.local_mtl_url)
+        ent_loc = tk.Entry(r_loc, textvariable=self.var_local_url, font=("Segoe UI", 9), bg=t["bg_editor"], fg=fg_editor, bd=1, relief="solid")
+        ent_loc.pack(side="left", fill="x", expand=True)
+        tk.Label(sec_local, text="Default Sugoi Toolkit: http://127.0.0.1:14366  |  LibreTranslate: http://127.0.0.1:5000/translate", font=("Segoe UI", 8), bg=t["bg_panel"], fg=t["fg_muted"]).pack(anchor="w", pady=(2, 0))
+
+        # LLM Section
+        sec_llm = tk.LabelFrame(content, text="OpenAI / LLM Endpoint (Ollama, LM Studio, etc.)", font=("Segoe UI", 9, "bold"), bg=t["bg_panel"], fg=t["misora_pink"], padx=10, pady=8)
+        sec_llm.pack(fill="x", pady=4)
+
+        r_llm1 = tk.Frame(sec_llm, bg=t["bg_panel"])
+        r_llm1.pack(fill="x", pady=2)
+        tk.Label(r_llm1, text="Base URL:", font=("Segoe UI", 9), bg=t["bg_panel"], fg=fg_panel, width=16, anchor="w").pack(side="left")
+        self.var_llm_url = tk.StringVar(value=self.app.mtl_config.llm_base_url)
+        ent_llm_url = tk.Entry(r_llm1, textvariable=self.var_llm_url, font=("Segoe UI", 9), bg=t["bg_editor"], fg=fg_editor, bd=1, relief="solid")
+        ent_llm_url.pack(side="left", fill="x", expand=True)
+
+        r_llm2 = tk.Frame(sec_llm, bg=t["bg_panel"])
+        r_llm2.pack(fill="x", pady=2)
+        tk.Label(r_llm2, text="Model Name:", font=("Segoe UI", 9), bg=t["bg_panel"], fg=fg_panel, width=16, anchor="w").pack(side="left")
+        self.var_llm_model = tk.StringVar(value=self.app.mtl_config.llm_model)
+        ent_llm_model = tk.Entry(r_llm2, textvariable=self.var_llm_model, font=("Segoe UI", 9), bg=t["bg_editor"], fg=fg_editor, bd=1, relief="solid", width=24)
+        ent_llm_model.pack(side="left", padx=(0, 10))
+
+        tk.Label(r_llm2, text="API Key (optional):", font=("Segoe UI", 9), bg=t["bg_panel"], fg=fg_panel).pack(side="left")
+        self.var_llm_key = tk.StringVar(value=self.app.mtl_config.llm_api_key)
+        ent_llm_key = tk.Entry(r_llm2, textvariable=self.var_llm_key, font=("Segoe UI", 9), bg=t["bg_editor"], fg=fg_editor, bd=1, relief="solid", show="*")
+        ent_llm_key.pack(side="left", fill="x", expand=True, padx=(4, 0))
+
+        # Behavior & Cache Section
+        sec_opt = tk.Frame(content, bg=t["bg_panel"])
+        sec_opt.pack(fill="x", pady=6)
+
+        self.var_protect = tk.BooleanVar(value=self.app.mtl_config.protect_tags)
+        tk.Checkbutton(sec_opt, text="Shield NGUI tags, Ruby tags & {playername} during translation", variable=self.var_protect, bg=t["bg_panel"], fg=fg_panel, selectcolor=t["bg_dark"]).pack(anchor="w")
+
+        self.var_xuat_cache = tk.BooleanVar(value=self.app.mtl_config.use_xuat_cache)
+        tk.Checkbutton(sec_opt, text="Use loaded XUAT translation dictionary as instant offline lookup", variable=self.var_xuat_cache, bg=t["bg_panel"], fg=fg_panel, selectcolor=t["bg_dark"]).pack(anchor="w")
+
+        r_to = tk.Frame(sec_opt, bg=t["bg_panel"])
+        r_to.pack(fill="x", pady=2)
+        tk.Label(r_to, text="Timeout (sec):", bg=t["bg_panel"], fg=fg_panel).pack(side="left")
+        self.var_timeout = tk.DoubleVar(value=self.app.mtl_config.timeout_sec)
+        sp_to = ttk.Spinbox(r_to, from_=3.0, to=60.0, increment=1.0, textvariable=self.var_timeout, width=6)
+        sp_to.pack(side="left", padx=6)
+
+        # Connection Test Box
+        tst_box = tk.Frame(content, bg=t["bg_editor"], bd=1, relief="solid", padx=8, pady=6)
+        tst_box.pack(fill="x", pady=6)
+
+        self.lbl_tst_result = tk.Label(tst_box, text="Click 'Test Connection' to verify active engine.", font=("Segoe UI", 9), bg=t["bg_editor"], fg=t["fg_muted"], anchor="w")
+        self.lbl_tst_result.pack(side="left", fill="x", expand=True)
+
+        self.btn_tst = ttk.Button(tst_box, text="Test Connection", style="Small.TButton", command=self._on_test_connection)
+        self.btn_tst.pack(side="right")
+
+        # Bottom Buttons
+        btn_bar = tk.Frame(self, bg=t["bg_panel"], padx=18, pady=12)
+        btn_bar.pack(fill="x", side="bottom")
+
+        ttk.Button(btn_bar, text="Cancel", style="TButton", command=self.destroy).pack(side="right", padx=4)
+        ttk.Button(btn_bar, text="Save & Apply", style="Pink.TButton", command=self._on_save).pack(side="right", padx=4)
+
+        ttk.Button(btn_bar, text="AI Prompt Settings...", style="Small.TButton", command=self._open_ai_prompt).pack(side="left")
+
+    def _open_ai_prompt(self):
+        self.app.on_open_ai_prompt_settings()
+
+    def _get_draft_config(self) -> MTLConfig:
+        cfg = MTLConfig(
+            active_engine=self.var_engine.get(),
+            src_lang=self.var_src.get().strip() or "ja",
+            tgt_lang=self.var_tgt.get().strip() or "en",
+            deepl_api_key=self.var_deepl_key.get().strip(),
+            deepl_use_pro=self.var_deepl_pro.get(),
+            local_mtl_url=self.var_local_url.get().strip(),
+            llm_base_url=self.var_llm_url.get().strip(),
+            llm_api_key=self.var_llm_key.get().strip(),
+            llm_model=self.var_llm_model.get().strip() or "qwen2.5:7b",
+            llm_system_prompt=self.app.mtl_config.llm_system_prompt,
+            protect_tags=self.var_protect.get(),
+            use_xuat_cache=self.var_xuat_cache.get(),
+            timeout_sec=float(self.var_timeout.get()),
+            rate_limit_delay=self.app.mtl_config.rate_limit_delay,
+            ai_prompt_include_header=self.app.mtl_config.ai_prompt_include_header,
+            ai_prompt_include_speaker=self.app.mtl_config.ai_prompt_include_speaker,
+        )
+        return cfg
+
+    def _on_test_connection(self):
+        cfg = self._get_draft_config()
+        self.lbl_tst_result.config(text=f"Testing {cfg.active_engine}...", fg=self.app.theme["fg_text"])
+        self.btn_tst.config(state="disabled")
+
+        def worker():
+            engine = MTLEngine(cfg)
+            ok, msg = engine.test_connection(cfg)
+            def update():
+                if self.winfo_exists():
+                    self.btn_tst.config(state="normal")
+                    col = self.app.theme["accent_green"] if ok else self.app.theme["accent_yellow"]
+                    self.lbl_tst_result.config(text=msg, fg=col)
+            self.after_idle(update)
+
+        t = threading.Thread(target=worker, daemon=True)
+        t.start()
+
+    def _on_save(self):
+        self.app.mtl_config = self._get_draft_config()
+        self.app._save_user_prefs()
+        self.app.show_toast(f"✓ Saved MTL preferences ({self.app.mtl_config.active_engine})")
+        self.destroy()
+
+
+class AIPromptSettingsDialog(tk.Toplevel):
+    """Configuration dialog for AI Prompt Header, Instructions, and Script Exporter."""
+    def __init__(self, parent: "MisoraApp"):
+        super().__init__(parent)
+        self.app = parent
+        self.title("AI / LLM Prompt & Script Settings")
+        self.geometry("680x560")
+        self.minsize(580, 480)
+        self.transient(parent)
+        self.grab_set()
+
+        t = self.app.theme
+        self.configure(bg=t["bg_panel"])
+        apply_window_icon(self)
+
+        fg_panel = best_contrast_fg(t["bg_panel"])
+        fg_editor = best_contrast_fg(t["bg_editor"])
+
+        content = tk.Frame(self, bg=t["bg_panel"], padx=18, pady=12)
+        content.pack(fill="both", expand=True)
+
+        tk.Label(
+            content,
+            text="AI Translation Prompt Header & Rules",
+            font=("Segoe UI", 12, "bold"),
+            bg=t["bg_panel"],
+            fg=t["misora_pink"],
+        ).pack(anchor="w", pady=(0, 6))
+
+        tk.Label(
+            content,
+            text=(
+                "Customize the system rules and context given to AI translation models (ChatGPT, Claude, Ollama, etc.).\n"
+                "The header will be prepended when you copy the entire script using 'Copy AI Translation Prompt'."
+            ),
+            font=("Segoe UI", 9),
+            bg=t["bg_panel"],
+            fg=t["fg_muted"],
+            justify="left",
+        ).pack(anchor="w", pady=(0, 8))
+
+        # Checkboxes
+        opts_frame = tk.Frame(content, bg=t["bg_panel"])
+        opts_frame.pack(fill="x", pady=4)
+
+        self.var_include_hdr = tk.BooleanVar(value=self.app.mtl_config.ai_prompt_include_header)
+        tk.Checkbutton(
+            opts_frame,
+            text="Include Prompt Header & Rules when copying script",
+            variable=self.var_include_hdr,
+            bg=t["bg_panel"],
+            fg=fg_panel,
+            selectcolor=t["bg_dark"],
+            font=("Segoe UI", 9, "bold"),
+        ).pack(anchor="w")
+
+        self.var_include_spk = tk.BooleanVar(value=self.app.mtl_config.ai_prompt_include_speaker)
+        tk.Checkbutton(
+            opts_frame,
+            text="Include Speaker Names in Box delimiters (=== [BOX:0|Speaker:コッコロ] ===)",
+            variable=self.var_include_spk,
+            bg=t["bg_panel"],
+            fg=fg_panel,
+            selectcolor=t["bg_dark"],
+            font=("Segoe UI", 9),
+        ).pack(anchor="w")
+
+        # Multi-line text for header
+        txt_frame = tk.Frame(content, bg=t["bg_editor"], bd=1, relief="solid")
+        txt_frame.pack(fill="both", expand=True, pady=8)
+
+        self.txt_prompt = tk.Text(
+            txt_frame,
+            wrap="word",
+            font=("Segoe UI", 9),
+            bg=t["bg_editor"],
+            fg=fg_editor,
+            insertbackground=t["misora_pink"],
+            bd=0,
+            padx=8,
+            pady=8,
+        )
+        sb = tk.Scrollbar(txt_frame, command=self.txt_prompt.yview)
+        sb.pack(side="right", fill="y")
+        self.txt_prompt.pack(side="left", fill="both", expand=True)
+        self.txt_prompt.config(yscrollcommand=sb.set)
+
+        self.txt_prompt.insert("1.0", self.app.mtl_config.llm_system_prompt)
+
+        # Bottom buttons
+        btn_bar = tk.Frame(self, bg=t["bg_panel"], padx=18, pady=12)
+        btn_bar.pack(fill="x", side="bottom")
+
+        ttk.Button(btn_bar, text="Reset to Recommended Default", style="Small.TButton", command=self._reset_default).pack(side="left")
+        ttk.Button(btn_bar, text="📋 Copy Script with Prompt Now", style="Small.TButton", command=self._copy_prompt_now).pack(side="left", padx=8)
+
+        ttk.Button(btn_bar, text="Cancel", style="TButton", command=self.destroy).pack(side="right", padx=4)
+        ttk.Button(btn_bar, text="Save & Close", style="Pink.TButton", command=self._save_and_close).pack(side="right", padx=4)
+
+    def _reset_default(self):
+        self.txt_prompt.delete("1.0", tk.END)
+        self.txt_prompt.insert("1.0", DEFAULT_LLM_PROMPT)
+
+    def _copy_prompt_now(self):
+        self._apply_settings_to_app()
+        self.app.on_copy_ai_prompt()
+
+    def _apply_settings_to_app(self):
+        self.app.mtl_config.llm_system_prompt = self.txt_prompt.get("1.0", tk.END).strip()
+        self.app.mtl_config.ai_prompt_include_header = self.var_include_hdr.get()
+        self.app.mtl_config.ai_prompt_include_speaker = self.var_include_spk.get()
+        self.app._save_user_prefs(silent=True)
+
+    def _save_and_close(self):
+        self._apply_settings_to_app()
+        self.app.show_toast("✓ Saved AI prompt configuration")
+        self.destroy()
+
+
+class TranslatorAssistantDialog(tk.Toplevel):
+    """
+    Dedicated floating Translation Assistant workspace.
+    Displays original Japanese, active engine output, comparison cards, and 1-click apply.
+    """
+    def __init__(self, parent: "MisoraApp"):
+        super().__init__(parent)
+        self.app = parent
+        self.title("Misora - Translator Assistant")
+        self.geometry("620x580")
+        self.minsize(540, 480)
+        self.transient(parent)
+
+        t = self.app.theme
+        self.configure(bg=t["bg_panel"])
+        apply_window_icon(self)
+
+        fg_panel = best_contrast_fg(t["bg_panel"])
+        fg_editor = best_contrast_fg(t["bg_editor"])
+
+        # Top Bar: Box navigation and engine selector
+        top_bar = tk.Frame(self, bg=t["bg_panel"], padx=14, pady=8)
+        top_bar.pack(fill="x")
+
+        self.lbl_box_info = tk.Label(
+            top_bar,
+            text="Box 0 / 0",
+            font=("Segoe UI", 10, "bold"),
+            bg=t["bg_panel"],
+            fg=t["misora_pink"],
+        )
+        self.lbl_box_info.pack(side="left")
+
+        ttk.Button(top_bar, text="< Prev", style="Nav.TButton", command=self._on_prev).pack(side="left", padx=(10, 2))
+        ttk.Button(top_bar, text="Next >", style="Nav.TButton", command=self._on_next).pack(side="left", padx=2)
+
+        self.lbl_speaker = tk.Label(
+            top_bar,
+            text="Speaker: -",
+            font=("Segoe UI", 9),
+            bg=t["bg_panel"],
+            fg=t["fg_muted"],
+        )
+        self.lbl_speaker.pack(side="left", padx=(10, 0))
+
+        # Engine selector on right
+        self.var_engine = tk.StringVar(value=self.app.mtl_config.active_engine)
+        cb = ttk.Combobox(top_bar, textvariable=self.var_engine, values=MTL_ENGINES, state="readonly", width=14)
+        cb.pack(side="right", padx=(4, 0))
+        cb.bind("<<ComboboxSelected>>", self._on_engine_change)
+
+        ttk.Button(top_bar, text="Fetch All", style="Small.TButton", command=self._on_fetch_all).pack(side="right", padx=2)
+        ttk.Button(top_bar, text="Translate (F8)", style="Pink.TButton", command=self._on_translate).pack(side="right", padx=2)
+
+        # Original Japanese Box
+        orig_frame = tk.LabelFrame(self, text="Original Dialogue (Japanese)", font=("Segoe UI", 9, "bold"), bg=t["bg_panel"], fg=fg_panel, padx=10, pady=6)
+        orig_frame.pack(fill="x", padx=14, pady=(4, 6))
+
+        self.txt_orig = tk.Text(
+            orig_frame,
+            wrap="word",
+            height=4,
+            font=("Segoe UI", 10),
+            bg=t["bg_editor"],
+            fg=fg_editor,
+            bd=1,
+            relief="solid",
+            padx=6,
+            pady=6,
+        )
+        self.txt_orig.pack(fill="x")
+
+        # Translated Dialogue Box
+        trans_frame = tk.LabelFrame(self, text="Translated Dialogue (Editable)", font=("Segoe UI", 9, "bold"), bg=t["bg_panel"], fg=t["misora_pink"], padx=10, pady=6)
+        trans_frame.pack(fill="both", expand=True, padx=14, pady=4)
+
+        self.txt_trans = tk.Text(
+            trans_frame,
+            wrap="word",
+            font=("Segoe UI", 10),
+            bg=t["bg_editor"],
+            fg=fg_editor,
+            insertbackground=t["misora_pink"],
+            bd=1,
+            relief="solid",
+            padx=6,
+            pady=6,
+        )
+        self.txt_trans.pack(fill="both", expand=True)
+
+        # Multi-engine comparison frame (collapsible)
+        self.comp_frame = tk.LabelFrame(self, text="Engine Comparison", font=("Segoe UI", 8, "bold"), bg=t["bg_panel"], fg=t["fg_muted"], padx=8, pady=4)
+
+        # Status / Feedback label
+        self.lbl_status = tk.Label(self, text="Ready", font=("Segoe UI", 8), bg=t["bg_panel"], fg=t["fg_muted"], anchor="w", padx=14)
+        self.lbl_status.pack(fill="x", pady=(2, 0))
+
+        # Bottom Action Bar
+        btn_bar = tk.Frame(self, bg=t["bg_panel"], padx=14, pady=10)
+        btn_bar.pack(fill="x", side="bottom")
+
+        ttk.Button(btn_bar, text="Close", style="TButton", command=self.destroy).pack(side="right", padx=4)
+        ttk.Button(btn_bar, text="Copy Translation", style="Small.TButton", command=self._on_copy).pack(side="right", padx=4)
+        ttk.Button(btn_bar, text="Apply & Next (Alt+S)", style="TButton", command=self._on_apply_and_next).pack(side="right", padx=4)
+        ttk.Button(btn_bar, text="Apply to Box (Ctrl+Enter)", style="Pink.TButton", command=self._on_apply).pack(side="right", padx=4)
+
+        ttk.Button(btn_bar, text="Configure Engines...", style="Small.TButton", command=self.app.on_open_mtl_settings).pack(side="left")
+
+        # Key bindings
+        self.bind("<F8>", lambda e: self._on_translate())
+        self.bind("<Control-Return>", lambda e: self._on_apply())
+        self.bind("<Alt-Left>", lambda e: self._on_prev())
+        self.bind("<Alt-Right>", lambda e: self._on_next())
+        self.bind("<Alt-s>", lambda e: self._on_apply_and_next())
+        self.bind("<Alt-S>", lambda e: self._on_apply_and_next())
+
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.refresh_box()
+
+    def _on_close(self):
+        self.app._translator_dialog = None
+        self.destroy()
+
+    def _on_engine_change(self, _event=None):
+        self.app.mtl_config.active_engine = self.var_engine.get()
+        self.lbl_status.config(text=f"Active engine set to: {self.var_engine.get()}")
+
+    def refresh_box(self):
+        if not self.winfo_exists():
+            return
+        doc = self.app.current_doc
+        if not doc or not doc.boxes:
+            self.lbl_box_info.config(text="Box 0 / 0")
+            self.lbl_speaker.config(text="Speaker: -")
+            self.txt_orig.config(state="normal")
+            self.txt_orig.delete("1.0", tk.END)
+            self.txt_orig.config(state="disabled")
+            return
+
+        b_idx = self.app.current_box_idx
+        b_idx = max(0, min(b_idx, len(doc.boxes) - 1))
+        box = doc.boxes[b_idx]
+
+        self.lbl_box_info.config(text=f"Box {b_idx + 1} / {len(doc.boxes)}")
+        self.lbl_speaker.config(text=f"Speaker: {box.speaker or '(None)'}")
+
+        self.txt_orig.config(state="normal")
+        self.txt_orig.delete("1.0", tk.END)
+        self.txt_orig.insert("1.0", box.clean_text)
+        self.txt_orig.config(state="disabled")
+
+        self.txt_trans.delete("1.0", tk.END)
+        self.txt_trans.insert("1.0", box.clean_text)
+        self.lbl_status.config(text=f"Loaded Box {b_idx + 1}")
+
+    def _on_prev(self):
+        self.app.on_prev_box()
+        self.refresh_box()
+
+    def _on_next(self):
+        self.app.on_next_box()
+        self.refresh_box()
+
+    def _on_translate(self):
+        doc = self.app.current_doc
+        if not doc or not doc.boxes:
+            return
+        b_idx = self.app.current_box_idx
+        box = doc.boxes[b_idx]
+        text_to_tr = box.clean_text.strip()
+        if not text_to_tr:
+            return
+
+        eng = self.var_engine.get()
+        self.lbl_status.config(text=f"Translating via {eng}...")
+
+        def on_success(res: str):
+            def update():
+                if self.winfo_exists():
+                    self.txt_trans.delete("1.0", tk.END)
+                    self.txt_trans.insert("1.0", res)
+                    self.lbl_status.config(text=f"✓ Translated via {eng}")
+            self.after_idle(update)
+
+        def on_error(err: str):
+            def show():
+                if self.winfo_exists():
+                    self.lbl_status.config(text=f"❌ Translation failed: {err}")
+            self.after_idle(show)
+
+        cfg = MTLConfig.from_dict(self.app.mtl_config.to_dict())
+        cfg.active_engine = eng
+
+        translate_async(
+            text_to_tr,
+            cfg,
+            on_success=on_success,
+            on_error=on_error,
+            xuat_cache=getattr(self.app, "xuat_entries", None),
+        )
+
+    def _on_fetch_all(self):
+        doc = self.app.current_doc
+        if not doc or not doc.boxes:
+            return
+        b_idx = self.app.current_box_idx
+        text_to_tr = doc.boxes[b_idx].clean_text.strip()
+        if not text_to_tr:
+            return
+
+        if not self.comp_frame.winfo_ismapped():
+            self.comp_frame.pack(fill="x", padx=14, pady=4, before=self.lbl_status)
+
+        for w in self.comp_frame.winfo_children():
+            w.destroy()
+
+        t = self.app.theme
+        fg_panel = best_contrast_fg(t["bg_panel"])
+
+        engines_to_query = ["Google", "DeepL", "Local / Sugoi", "LLM / OpenAI", "XUAT Cache"]
+        for eng in engines_to_query:
+            row = tk.Frame(self.comp_frame, bg=t["bg_panel"])
+            row.pack(fill="x", pady=1)
+
+            lbl_name = tk.Label(row, text=f"[{eng}]:", font=("Segoe UI", 8, "bold"), bg=t["bg_panel"], fg=t["misora_pink"], width=14, anchor="w")
+            lbl_name.pack(side="left")
+
+            lbl_val = tk.Label(row, text="Fetching...", font=("Segoe UI", 8), bg=t["bg_panel"], fg=t["fg_muted"], anchor="w")
+            lbl_val.pack(side="left", fill="x", expand=True)
+
+            btn_use = ttk.Button(row, text="Use", style="Small.TButton", width=4)
+            btn_use.pack(side="right")
+            btn_use.config(state="disabled")
+
+            def make_worker(engine_name=eng, val_lbl=lbl_val, use_btn=btn_use):
+                def worker():
+                    cfg = MTLConfig.from_dict(self.app.mtl_config.to_dict())
+                    cfg.active_engine = engine_name
+                    engine = MTLEngine(cfg)
+                    try:
+                        res = engine.translate(text_to_tr, config=cfg, xuat_cache=getattr(self.app, "xuat_entries", None))
+                        def ok():
+                            if self.winfo_exists() and val_lbl.winfo_exists():
+                                val_lbl.config(text=res, fg=fg_panel)
+                                use_btn.config(state="normal", command=lambda r=res: self._use_comp_text(r))
+                        self.after_idle(ok)
+                    except Exception as exc:
+                        def fail():
+                            if self.winfo_exists() and val_lbl.winfo_exists():
+                                val_lbl.config(text=f"Failed ({exc})", fg=self.app.theme["accent_yellow"])
+                        self.after_idle(fail)
+
+                threading.Thread(target=worker, daemon=True).start()
+
+            make_worker()
+
+    def _use_comp_text(self, text: str):
+        self.txt_trans.delete("1.0", tk.END)
+        self.txt_trans.insert("1.0", text)
+
+    def _on_apply(self) -> bool:
+        doc = self.app.current_doc
+        if not doc or not doc.boxes:
+            return False
+        b_idx = self.app.current_box_idx
+        if b_idx < 0 or b_idx >= len(doc.boxes):
+            return False
+        new_text = self.txt_trans.get("1.0", tk.END).strip()
+        old_box = doc.boxes[b_idx]
+
+        self.app.undo_journal.record(
+            BoxEditDelta(
+                box_index=b_idx,
+                old_speaker=old_box.speaker,
+                new_speaker=old_box.speaker,
+                old_text=old_box.clean_text,
+                new_text=new_text,
+                file_path=str(self.app.current_file_path) if self.app.current_file_path else "",
+            )
+        )
+        doc.inject_box(b_idx, old_box.speaker, new_text)
+        self.app._modified_boxes.add(b_idx)
+        self.app.is_dirty = True
+        self.app._update_views()
+        self.app.show_toast(f"✓ Applied translation to Box {b_idx + 1}")
+        return True
+
+    def _on_apply_and_next(self):
+        if self._on_apply():
+            self._on_next()
+
+    def _on_copy(self):
+        t = self.txt_trans.get("1.0", tk.END).strip()
+        if t:
+            self.clipboard_clear()
+            self.clipboard_append(t)
+            self.app.show_toast("📋 Copied translation to clipboard")
+
+
+class BatchTranslateDialog(tk.Toplevel):
+    """Dialog for automated batch translation of an entire story bundle."""
+    def __init__(self, parent: "MisoraApp"):
+        super().__init__(parent)
+        self.app = parent
+        self.title("Batch Translate Story")
+        self.geometry("560x420")
+        self.minsize(500, 380)
+        self.transient(parent)
+        self.grab_set()
+
+        t = self.app.theme
+        self.configure(bg=t["bg_panel"])
+        apply_window_icon(self)
+
+        fg_panel = best_contrast_fg(t["bg_panel"])
+
+        self._cancelled = False
+        self._is_running = False
+
+        content = tk.Frame(self, bg=t["bg_panel"], padx=18, pady=12)
+        content.pack(fill="both", expand=True)
+
+        tk.Label(content, text="Batch Translation", font=("Segoe UI", 12, "bold"), bg=t["bg_panel"], fg=t["misora_pink"]).pack(anchor="w", pady=(0, 6))
+
+        # Engine
+        r_eng = tk.Frame(content, bg=t["bg_panel"])
+        r_eng.pack(fill="x", pady=4)
+        tk.Label(r_eng, text="Translation Engine:", font=("Segoe UI", 9, "bold"), bg=t["bg_panel"], fg=fg_panel, width=18, anchor="w").pack(side="left")
+        self.var_engine = tk.StringVar(value=self.app.mtl_config.active_engine)
+        cb_eng = ttk.Combobox(r_eng, textvariable=self.var_engine, values=MTL_ENGINES, state="readonly", width=18)
+        cb_eng.pack(side="left")
+
+        # Scope
+        sec_scope = tk.LabelFrame(content, text="Scope & Filter", font=("Segoe UI", 9, "bold"), bg=t["bg_panel"], fg=t["misora_pink"], padx=10, pady=6)
+        sec_scope.pack(fill="x", pady=6)
+
+        self.var_scope = tk.StringVar(value="untranslated")
+        tk.Radiobutton(sec_scope, text="Untranslated Only (Contains Japanese characters)", variable=self.var_scope, value="untranslated", bg=t["bg_panel"], fg=fg_panel, selectcolor=t["bg_dark"]).pack(anchor="w")
+        tk.Radiobutton(sec_scope, text="All Boxes in Story", variable=self.var_scope, value="all", bg=t["bg_panel"], fg=fg_panel, selectcolor=t["bg_dark"]).pack(anchor="w")
+        tk.Radiobutton(sec_scope, text=f"From Current Box ({self.app.current_box_idx + 1}) to End", variable=self.var_scope, value="from_current", bg=t["bg_panel"], fg=fg_panel, selectcolor=t["bg_dark"]).pack(anchor="w")
+
+        # Rate Limit Delay
+        r_del = tk.Frame(content, bg=t["bg_panel"])
+        r_del.pack(fill="x", pady=4)
+        tk.Label(r_del, text="Delay between requests (sec):", bg=t["bg_panel"], fg=fg_panel).pack(side="left")
+        self.var_delay = tk.DoubleVar(value=0.3)
+        sp_del = ttk.Spinbox(r_del, from_=0.0, to=5.0, increment=0.1, textvariable=self.var_delay, width=6)
+        sp_del.pack(side="left", padx=6)
+
+        # Progress bar
+        self.progress = ttk.Progressbar(content, orient="horizontal", mode="determinate")
+        self.progress.pack(fill="x", pady=(12, 4))
+
+        self.lbl_status = tk.Label(content, text="Ready to start batch translation.", font=("Segoe UI", 9), bg=t["bg_panel"], fg=t["fg_muted"], anchor="w")
+        self.lbl_status.pack(fill="x", pady=2)
+
+        # Bottom Buttons
+        btn_bar = tk.Frame(self, bg=t["bg_panel"], padx=18, pady=12)
+        btn_bar.pack(fill="x", side="bottom")
+
+        self.btn_close = ttk.Button(btn_bar, text="Close", style="TButton", command=self._on_close)
+        self.btn_close.pack(side="right", padx=4)
+
+        self.btn_start = ttk.Button(btn_bar, text="Start Batch", style="Pink.TButton", command=self._start_batch)
+        self.btn_start.pack(side="right", padx=4)
+
+    def _on_close(self):
+        if self._is_running:
+            self._cancelled = True
+        self.destroy()
+
+    def _start_batch(self):
+        doc = self.app.current_doc
+        if not doc or not doc.boxes:
+            messagebox.showwarning("No Story Open", "Open a story bundle or text file first.")
+            return
+
+        jp_regex = re.compile(r"[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]")
+        scope = self.var_scope.get()
+        targets: List[int] = []
+
+        for i, box in enumerate(doc.boxes):
+            if scope == "from_current" and i < self.app.current_box_idx:
+                continue
+            if scope == "untranslated":
+                if jp_regex.search(box.clean_text):
+                    targets.append(i)
+            else:
+                targets.append(i)
+
+        if not targets:
+            self.lbl_status.config(text="No boxes matching selected criteria.")
+            messagebox.showinfo("Batch Complete", "No boxes matched the criteria for translation.")
+            return
+
+        self._cancelled = False
+        self._is_running = True
+        self.btn_start.config(state="disabled")
+        self.progress.config(maximum=len(targets), value=0)
+
+        cfg = MTLConfig.from_dict(self.app.mtl_config.to_dict())
+        cfg.active_engine = self.var_engine.get()
+        delay = float(self.var_delay.get())
+        engine = MTLEngine(cfg)
+
+        def worker():
+            self.app.undo_journal.begin_batch(f"Batch Translate ({len(targets)} boxes)")
+            translated_count = 0
+
+            for step, b_idx in enumerate(targets):
+                if self._cancelled:
+                    break
+                box = doc.boxes[b_idx]
+                raw_text = box.clean_text.strip()
+                if not raw_text:
+                    continue
+
+                def update_prog(idx=step + 1, box_num=b_idx + 1):
+                    if self.winfo_exists():
+                        self.progress.config(value=idx)
+                        self.lbl_status.config(text=f"Translating Box {box_num} ({idx} / {len(targets)})...")
+                self.after_idle(update_prog)
+
+                try:
+                    res = engine.translate(raw_text, config=cfg, xuat_cache=getattr(self.app, "xuat_entries", None))
+                    self.app.undo_journal.record(
+                        BoxEditDelta(
+                            box_index=b_idx,
+                            old_speaker=box.speaker,
+                            new_speaker=box.speaker,
+                            old_text=box.clean_text,
+                            new_text=res,
+                            file_path=str(self.app.current_file_path) if self.app.current_file_path else "",
+                        )
+                    )
+                    doc.inject_box(b_idx, box.speaker, res)
+                    self.app._modified_boxes.add(b_idx)
+                    translated_count += 1
+                except Exception as exc:
+                    self.app.logger.warning("MTL", f"Batch translate failed on box {b_idx}: {exc}")
+
+                if delay > 0 and step < len(targets) - 1:
+                    import time
+                    time.sleep(delay)
+
+            self.app.undo_journal.end_batch()
+            self.app.is_dirty = True
+
+            def finish():
+                if self.winfo_exists():
+                    self._is_running = False
+                    self.btn_start.config(state="normal")
+                    self.lbl_status.config(text=f"Completed: {translated_count} boxes translated.")
+                    self.app._update_views()
+                    self.app.show_toast(f"✓ Batch translated {translated_count} boxes")
+            self.after_idle(finish)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+
+
 
     def on_about(self) -> None:
         about_text = (

@@ -120,6 +120,12 @@ class MisoraLogger:
             if len(self._history) > self._max_history:
                 self._history = self._history[-self._max_history :]
 
+            # Real-time streaming to native Windows console
+            try:
+                print(entry.format_line(), file=sys.stdout, flush=True)
+            except Exception:
+                pass
+
             try:
                 self._ui_queue.put_nowait(entry)
             except queue.Full:
