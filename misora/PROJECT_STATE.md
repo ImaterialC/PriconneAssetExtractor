@@ -15,6 +15,7 @@ After "go": begin Step P0-1 (fix Ctrl+Z/Y block in Continuous key guard).
 - **Git commits:**
   - `bcc57c6`: Initial takeover `PROJECT_STATE.md` audit.
   - `db599f9`: Fixed `misora.bat` invocation bug.
+  - `d96da3d`: Updated `misora.bat` to auto-detect Python 3.12 where UnityPy is installed (resolves Python 3.15 default conflict).
 - **Old session backups preserved:** `misora.py.bak_20261118_142038`, `misora.py.bak2_20261118_142158`.
 
 ---
