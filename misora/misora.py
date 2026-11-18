@@ -1435,10 +1435,13 @@ class MisoraApp(tk.Tk):
                 elif role == "label_ribbon_sep":
                     w.configure(bg=t["bg_editor"], fg=t["border"])
                 elif role == "check_panel":
+                    # Radiobuttons use accent color so the selection dot is visible
+                    import tkinter as _tk_local
+                    _sc = t["misora_pink"] if isinstance(w, _tk_local.Radiobutton) else t["bg_dark"]
                     w.configure(
                         bg=t["bg_panel"],
                         fg=panel_fg,
-                        selectcolor=t["bg_dark"],
+                        selectcolor=_sc,
                         activebackground=t["bg_panel"],
                         activeforeground=panel_fg,
                         font=("Segoe UI", u_sz),
@@ -1930,8 +1933,13 @@ class MisoraApp(tk.Tk):
             self.dnd_size_threshold_mb = s_val
             self.dnd_filter_binary = bool(var_filter.get())
             self._save_user_prefs(silent=True)
-            self.lbl_status.config(text="Drag & drop safety settings saved.")
+            self.lbl_status.config(text="Drag & Drop safety settings saved.")
             dlg.destroy()
+            messagebox.showinfo(
+                "Settings Saved",
+                "Drag & Drop safety settings have been saved.",
+                parent=self,
+            )
 
         ttk.Button(btn_bar, text="Save Settings", style="Accent.TButton", command=_save).pack(side="left", padx=(0, 6))
         ttk.Button(btn_bar, text="Cancel", style="TButton", command=dlg.destroy).pack(side="left")
@@ -1993,6 +2001,7 @@ class MisoraApp(tk.Tk):
                 folder = dirs[0].resolve()
                 self.selected_search_folder = folder
                 self.scope_var.set("folder")
+                self._sync_scope_widgets()
                 story_files = (
                     sorted(folder.glob("*.unity3d")) +
                     sorted(folder.glob("*.asset")) +
@@ -2013,10 +2022,10 @@ class MisoraApp(tk.Tk):
                 else:
                     ans = messagebox.askyesnocancel(
                         "Open Folder Story Files",
-                        f"Found {len(story_files)} story files in folder:\n'{folder.name}'\n\n"
-                        f"• Yes: Open all {len(story_files)} files into tabs\n"
-                        f"• No: Open only the first file ('{story_files[0].name}') and set search scope\n"
-                        f"• Cancel: Only set search scope (open nothing)",
+                        f"Found {len(story_files)} story file(s) in folder '{folder.name}'.\n\n"
+                        f"  Yes    – Open all {len(story_files)} files as editor tabs\n"
+                        f"  No     – Set search scope to this folder only (open nothing)\n"
+                        f"  Cancel – Abort: do nothing, keep the current state",
                         default=messagebox.YES,
                     )
                     if ans is True:
@@ -2034,17 +2043,16 @@ class MisoraApp(tk.Tk):
                         else:
                             self.lbl_status.config(text=f"Folder set for search: {folder.name}")
                     elif ans is False:
-                        try:
-                            self.open_file(story_files[0])
-                            self.lbl_status.config(
-                                text=f"Opened \"{story_files[0].name}\" ({len(story_files)} files in folder). Search scope set."
-                            )
-                        except Exception as exc:  # noqa: BLE001
-                            self.logger.error("Drag & Drop", f"Could not open {story_files[0].name}: {exc}")
-                    else:
+                        # "No" = Set scope to folder only, open nothing
                         self.lbl_status.config(
-                            text=f"Folder set for search: {folder.name} ({len(story_files)} story files found)."
+                            text=f"Search scope set to folder: {folder.name} ({len(story_files)} story file(s) found). No files opened."
                         )
+                    else:
+                        # "Cancel" = Abort, undo scope change
+                        self.selected_search_folder = None
+                        self.scope_var.set("project")
+                        self._sync_scope_widgets()
+                        self.lbl_status.config(text="Folder drop cancelled. No changes made.")
         except Exception as exc:
             self.logger.exception("Error while handling dropped path(s):", exc)
             messagebox.showerror("Drag & Drop Error", f"Failed to open dropped item:\n{exc}")
@@ -2759,16 +2767,19 @@ class MisoraApp(tk.Tk):
         self._tag_role(tk.Label(row2, text="|", bg=t["bg_panel"], fg=t["border"]), "label_sep").pack(side="left", padx=8)
 
         self._tag_role(tk.Label(row2, text="Scope:", bg=t["bg_panel"], fg=t["fg_muted"]), "label_muted").pack(side="left", padx=(0, 4))
-        self.scope_var = tk.StringVar(value="project")
+        # Use misora_pink as selectcolor so the radio dot is clearly visible
+        # (bg_dark is nearly identical to bg_panel in light themes)
+        _rb_selectcolor = t["misora_pink"]
+        self.scope_var = tk.StringVar(master=self, value="project")
 
         rb_proj = self._tag_role(
-            tk.Radiobutton(row2, text="Project", variable=self.scope_var, value="project", bg=t["bg_panel"], fg=t["fg_text"], selectcolor=t["bg_dark"], activebackground=t["bg_panel"], command=self._sync_scope_widgets),
+            tk.Radiobutton(row2, text="Project", variable=self.scope_var, value="project", bg=t["bg_panel"], fg=t["fg_text"], selectcolor=_rb_selectcolor, activebackground=t["bg_panel"], command=self._sync_scope_widgets),
             "check_panel"
         )
         rb_proj.pack(side="left", padx=2)
 
         rb_folder = self._tag_role(
-            tk.Radiobutton(row2, text="Folder", variable=self.scope_var, value="folder", bg=t["bg_panel"], fg=t["fg_text"], selectcolor=t["bg_dark"], activebackground=t["bg_panel"], command=self._sync_scope_widgets),
+            tk.Radiobutton(row2, text="Folder", variable=self.scope_var, value="folder", bg=t["bg_panel"], fg=t["fg_text"], selectcolor=_rb_selectcolor, activebackground=t["bg_panel"], command=self._sync_scope_widgets),
             "check_panel"
         )
         rb_folder.pack(side="left", padx=2)
@@ -2791,7 +2802,7 @@ class MisoraApp(tk.Tk):
         self.btn_browse_search_folder = ttk.Button(row2, text="...", style="Small.TButton", command=self.on_open_folder, width=2)
 
         rb_cur = self._tag_role(
-            tk.Radiobutton(row2, text="Current File", variable=self.scope_var, value="current", bg=t["bg_panel"], fg=t["fg_text"], selectcolor=t["bg_dark"], activebackground=t["bg_panel"], command=self._sync_scope_widgets),
+            tk.Radiobutton(row2, text="Current File", variable=self.scope_var, value="current", bg=t["bg_panel"], fg=t["fg_text"], selectcolor=_rb_selectcolor, activebackground=t["bg_panel"], command=self._sync_scope_widgets),
             "check_panel"
         )
         rb_cur.pack(side="left", padx=2)
