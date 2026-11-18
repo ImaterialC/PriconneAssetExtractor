@@ -4,14 +4,13 @@
 ---
 
 ## SESSION HANDOFF / RESUME INSTRUCTIONS
-**Current step:** Bug #12 (Color Picker) updated:
-- Restored Pillow `Image.frombytes` for Hue Bar rendering (eliminates Tk `put()` string parsing exceptions on Windows Tcl/Tk)
-- Added explicit popup title `NGUI Color & Gradient Picker (v1.3.3)` to visually confirm new code is active
-- Added crash dialog (`messagebox.showerror`) and file logging (`picker_error.log`) inside `NguiColorPickerPopup.__init__` to catch and expose any initialization error
-- Minimum geometry expanded to 420x340
-- Unit tests: 11/11 passing
+**Current step:** Bug #12 (Color Picker) root cause found and resolved:
+- Root cause: `self.var_hex = tk.StringVar(value=...)` was called without `master=self`, triggering `RuntimeError: Too early to create variable: no default root window` in Tkinter right after packing `Hex:` label.
+- Fix (`4ea685b`): Added `master=self` to `self.var_hex`, plus added explicit `master=dlg` to all other dialog `StringVar`/`BooleanVar` instances.
+- Tested: `NguiColorPickerPopup` now initializes completely to `420x340` with all 4 child frames mapped, SV map, Hue bar, swatches, and Insert buttons.
+- Unit tests: 11/11 passing.
 
-**Next action:** Await user verification of the color picker window in v1.3.3.
+**Next action:** Await user verification of the fully functional color picker window.
 
 ---
 
