@@ -1,12 +1,21 @@
 # MISORA — PROJECT STATE
-*Last updated: 2026-11-18 — Phase 0 audit complete, awaiting user approval before any edits*
+*Last updated: 2026-11-18 — Takeover baseline archived, misora.bat crash resolved, ready for testing*
 
 ---
 
 ## SESSION HANDOFF / RESUME INSTRUCTIONS
-**Current step:** Phase 0 complete — audit + gap matrix written.  
-**Next action:** User reviews this document and gives "go" approval for the prioritized plan.  
+**Current step:** Baseline snapshot created in `_archive/20261118_takeover_baseline/` and git commit `db599f9`. Launcher crash in `misora.bat` fixed.  
+**Next action:** User launches `misora.bat` to confirm the app opens, reviews prioritized plan, and gives "go" for Step P0-1.  
 After "go": begin Step P0-1 (fix Ctrl+Z/Y block in Continuous key guard).
+
+---
+
+## BACKUP & SAFETY ARCHIVE
+- **Disk snapshot archive:** `misora/_archive/20261118_takeover_baseline/` (contains exact pristine copies of `misora.py`, `assets/`, `core/`, `tests/`, etc.).
+- **Git commits:**
+  - `bcc57c6`: Initial takeover `PROJECT_STATE.md` audit.
+  - `db599f9`: Fixed `misora.bat` invocation bug.
+- **Old session backups preserved:** `misora.py.bak_20261118_142038`, `misora.py.bak2_20261118_142158`.
 
 ---
 
