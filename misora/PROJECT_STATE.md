@@ -1,5 +1,5 @@
 # MISORA — PROJECT STATE
-*Last updated: 2026-11-18 — Find UI [...] placement, Project Scope path display, Folder DnD 'No' path population, and Configure Paths Dialog overhaul complete*
+*Last updated: 2026-11-18 — Project Folder <-> Find UI Linking, Multi-Framework Agnostic Naming, and Settings Saved Notification complete*
 
 ---
 
@@ -9,22 +9,22 @@
 2. Find UI Layout & Window Snapping UX:
    - Placed `[...]` browse button to the LEFT of the directory entry (`[...] [ Directory Path Entry (expand=True) ]`).
    - Directory entry expanded across remaining horizontal space (`fill="x", expand=True`) so resizing / window snapping gracefully shrinks the entry without clipping the browse button.
-3. Project Scope Directory Path:
-   - When Scope is `Project`: displays project path (from `bepinex_project_folder`, `xuat_search_roots`, or parent), and `[...]` lets the user browse and configure the project folder.
+3. Project Scope Directory Path & Two-Way Linking:
+   - When Scope is `Project`: displays project path (from `project_folder`, `bepinex_project_folder`, or detected translation root).
+   - Linked two-way between Find UI Scope: Project directory entry and `Configure Paths, Backups & Folders` dialog (`Project / Mod Folder`). Edits in either update the other immediately and persist to `misora_config.json`.
    - When Scope is `Folder`: displays `selected_search_folder`, and `[...]` lets the user browse search folder.
    - When Scope is `Current File(s)`: displays active document directory, entry is read-only, `[...]` is disabled.
-4. DnD Folder Drop "No":
-   - When user selects "No" (set search scope to folder, open nothing): immediately populates `self.folder_path_var.set(str(folder))`, switches scope to `Folder`, syncs widgets, and displays a toast notification.
-5. "Configure Paths, Backups & Folders" Dialog Overhaul:
-   - Fixed packing order: bottom button bar (`btn_bar`) packed `side="bottom", fill="x"` first so Save & Apply / Cancel buttons can never be clipped or hidden.
-   - Fixed row layout: `make_row` packs browse and open buttons `side="right"` before the entry is packed `side="left", fill="x", expand=True`, ensuring all buttons remain anchored on the right and entries expand to fill the available space.
-   - Restored and organized all rows: Backup Folder (with Browse & Open buttons, default checkbox), BepInEx Project Folder (with Browse & Open buttons), Datamine Tool (with Browse button), Notepad++ Executable (with Browse button), External Text Editor (with Browse button), Config File (with Reveal in Explorer), Debug Log (with Open button).
-   - Added `show_toast("Paths and backup settings saved successfully!")` on save.
-6. Folders & Files Menu Extensions:
-   - Added: Open Backups Folder, Open BepInEx Translation Folder, Open XUAT Text Folder, Open RedirectedResources Folder, Open Selected Search Folder, Open Misora Program Folder.
-7. Unit tests: 11/11 passing.
+4. Framework-Agnostic Terminology & Multi-Framework Mod Support:
+   - Deprecated "BepInEx"-specific labels across the UI in favor of framework-agnostic terminology: "Project / Mod Folder", "Project Translation Folder", supporting MelonLoader, BepInEx, XUAT, and custom mod structures.
+   - Preserved full backward-compatibility for `bepinex_project_folder` attribute and JSON config keys.
+   - Extended directory search logic for `Open Text Translation Folder` and `Open Redirected Resources Folder` to check standard paths across frameworks (`Text`, `Translation/en/Text`, `UserData/Text`, `RedirectedResources`, `Mods/RedirectedResources`, `UserData/RedirectedResources`).
+5. Settings Saved Notifications:
+   - Added popup confirmation (`messagebox.showinfo("Settings Saved", ...)`) upon saving settings in `Configure Paths, Backups & Folders`, `MTL Settings`, and `AI Prompt Settings`.
+6. DnD Folder Drop UX:
+   - Overhauled flow: Yes (open all into tabs, switch scope to Current File(s)), No (set search scope to folder, populate path entry, open nothing), Cancel (abort, keep prior selection).
+7. Unit tests: 16/16 passing across `tests/test_misora_core.py` and `tests/test_misora_ui_integration.py`.
 
-**Next action:** Await user verification of the Find UI, Project path display, and Configure Paths dialog, then proceed to Bug #15 (Plain `.txt` save verification) or next priority tasks.
+**Next action:** Await user verification of the Project Folder linking and framework-agnostic mod folder support.
 
 ---
 

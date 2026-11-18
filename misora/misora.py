@@ -996,7 +996,8 @@ class MisoraApp(tk.Tk):
 
         # Path config & persistent workspace states (initialized before _load_user_prefs)
         self.backup_folder: Optional[Path] = None
-        self.bepinex_project_folder: Optional[Path] = None
+        self.project_folder: Optional[Path] = None
+        self.bepinex_project_folder: Optional[Path] = None  # Backward-compatible alias
         self.datamine_exe: Optional[Path] = None
         self.external_editor_path: Optional[Path] = None
         self.notepadpp_path: Optional[Path] = None
@@ -1246,7 +1247,8 @@ class MisoraApp(tk.Tk):
                     v = raw.get(key)
                     return Path(v) if isinstance(v, str) and v else None
                 self.backup_folder = _load_path("backup_folder")
-                self.bepinex_project_folder = _load_path("bepinex_project_folder")
+                self.project_folder = _load_path("project_folder") or _load_path("bepinex_project_folder")
+                self.bepinex_project_folder = self.project_folder
                 self.datamine_exe = _load_path("datamine_exe")
                 self.external_editor_path = _load_path("external_editor_path")
                 self.notepadpp_path = _load_path("notepadpp_path")
@@ -1310,7 +1312,8 @@ class MisoraApp(tk.Tk):
                 "debug": dbg_snapshot,
                 # Path & dock state
                 "backup_folder": str(self.backup_folder) if self.backup_folder else "",
-                "bepinex_project_folder": str(self.bepinex_project_folder) if self.bepinex_project_folder else "",
+                "project_folder": str(self.project_folder) if getattr(self, "project_folder", None) else (str(self.bepinex_project_folder) if getattr(self, "bepinex_project_folder", None) else ""),
+                "bepinex_project_folder": str(self.bepinex_project_folder) if getattr(self, "bepinex_project_folder", None) else (str(self.project_folder) if getattr(self, "project_folder", None) else ""),
                 "datamine_exe": str(self.datamine_exe) if self.datamine_exe else "",
                 "external_editor_path": str(self.external_editor_path) if self.external_editor_path else "",
                 "notepadpp_path": str(self.notepadpp_path) if self.notepadpp_path else "",
@@ -2069,22 +2072,33 @@ class MisoraApp(tk.Tk):
     # Environment & WCAG Contrast-Safe ttk Styling (#13, #4, #7)
     # -------------------------------------------------------------------------
     def _detect_environment(self) -> None:
-        """Auto-detect Priconne BepInEx RedirectedResources, XUAT Text folders, and Notepad++."""
+        """Auto-detect Priconne mod/translation project roots (BepInEx, MelonLoader, XUAT) and Notepad++."""
         candidates = [
             Path(r"C:\[Gacha]\PriconneRe-TL\src\BepInEx\Translation\en"),
+            Path(r"C:\[Gacha]\PriconneRe-TL\src\BepInEx"),
             Path("output"),
             Path("input"),
             SCRIPT_DIR.parent / "input",
             SCRIPT_DIR.parent / "output",
         ]
-        if self.bepinex_project_folder and self.bepinex_project_folder.exists():
-            candidates.insert(0, self.bepinex_project_folder)
+        active_proj = getattr(self, "project_folder", None) or getattr(self, "bepinex_project_folder", None)
+        if active_proj and active_proj.exists():
+            candidates.insert(0, active_proj)
+
+        found_proj = None
         for c in candidates:
             if c.exists():
                 text_dir = c / "Text"
                 target = text_dir if text_dir.exists() else c
                 if target not in self.xuat_search_roots:
                     self.xuat_search_roots.append(target)
+                if not found_proj and c != SCRIPT_DIR.parent / "input" and c != SCRIPT_DIR.parent / "output" and c != Path("input") and c != Path("output"):
+                    found_proj = target if target.exists() else c
+
+        # If user has not explicitly configured project_folder, adopt the detected mod root
+        if not getattr(self, "project_folder", None) and found_proj:
+            self.project_folder = found_proj
+            self.bepinex_project_folder = found_proj
 
         # Auto-detect Notepad++ if not already set
         if not self.notepadpp_path or not Path(self.notepadpp_path).exists():
@@ -2490,15 +2504,15 @@ class MisoraApp(tk.Tk):
             command=self.on_open_backups_folder,
         )
         folders_menu.add_command(
-            label="Open BepInEx Translation Folder",
-            command=self.on_open_bepinex_folder,
+            label="Open Project / Mod Root Folder",
+            command=self.on_open_project_folder,
         )
         folders_menu.add_command(
-            label="Open XUAT Text Folder",
+            label="Open Text Translation Folder (Text / XUAT)",
             command=self.on_open_xuat_text_folder,
         )
         folders_menu.add_command(
-            label="Open RedirectedResources Folder",
+            label="Open Redirected Resources Folder",
             command=self.on_open_redirected_resources_folder,
         )
         folders_menu.add_command(
@@ -2821,6 +2835,7 @@ class MisoraApp(tk.Tk):
 
         # Directory path entry on RIGHT of [...], expands to fill remaining space
         self.folder_path_var = tk.StringVar(master=self, value="")
+        self.folder_path_var.trace_add("write", lambda *args: self._on_folder_path_var_trace())
         self.folder_path_entry = self._tag_role(
             tk.Entry(
                 row2,
@@ -2835,6 +2850,7 @@ class MisoraApp(tk.Tk):
         )
         self.folder_path_entry.pack(side="left", fill="x", expand=True, padx=(0, 2))
         self.folder_path_entry.bind("<Return>", lambda e: self.on_start_search())
+        self.folder_path_entry.bind("<FocusOut>", lambda e: self._save_user_prefs(silent=True))
 
         self.progress_bar = ttk.Progressbar(self.search_frame, mode="determinate")
         self.progress_bar.pack(fill="x", padx=8, pady=(0, 2))
@@ -5883,11 +5899,13 @@ class MisoraApp(tk.Tk):
         else:
             ent_val = self.folder_path_var.get().strip() if hasattr(self, "folder_path_var") else ""
             if ent_val and Path(ent_val).is_dir():
-                self.bepinex_project_folder = Path(ent_val)
+                self.project_folder = Path(ent_val)
+                self.bepinex_project_folder = self.project_folder
+            active_proj = getattr(self, "project_folder", None) or getattr(self, "bepinex_project_folder", None)
             target_paths = list(self.xuat_search_roots)
-            if self.bepinex_project_folder and self.bepinex_project_folder.exists():
-                text_dir = self.bepinex_project_folder / "Text"
-                root = text_dir if text_dir.exists() else self.bepinex_project_folder
+            if active_proj and active_proj.exists():
+                text_dir = active_proj / "Text"
+                root = text_dir if text_dir.exists() else active_proj
                 if root not in target_paths:
                     target_paths.insert(0, root)
             for p in (Path("input"), Path("output"), SCRIPT_DIR.parent / "input", SCRIPT_DIR.parent / "output"):
@@ -6243,39 +6261,73 @@ class MisoraApp(tk.Tk):
             self.show_toast(f"Search folder set to: {folder.name}")
 
     def _get_project_display_path(self) -> str:
-        """Return the effective project directory path."""
-        if getattr(self, "bepinex_project_folder", None) and Path(self.bepinex_project_folder).exists():
-            return str(self.bepinex_project_folder)
+        """Return the effective project directory path (BepInEx, MelonLoader, XUAT, etc.)."""
+        p = getattr(self, "project_folder", None) or getattr(self, "bepinex_project_folder", None)
+        if p and Path(p).exists():
+            return str(p)
         if getattr(self, "xuat_search_roots", None) and self.xuat_search_roots:
-            return str(self.xuat_search_roots[0])
-        return str(SCRIPT_DIR.parent)
+            first_root = self.xuat_search_roots[0]
+            if first_root.exists():
+                self.project_folder = first_root
+                self.bepinex_project_folder = first_root
+                return str(first_root)
+        parent_dir = SCRIPT_DIR.parent
+        self.project_folder = parent_dir
+        self.bepinex_project_folder = parent_dir
+        return str(parent_dir)
+
+    def _on_folder_path_var_trace(self) -> None:
+        """Synchronize project_folder or selected_search_folder when user edits folder_path_var."""
+        if getattr(self, "_syncing_folder_path_var", False):
+            return
+        scope_v = getattr(self, "scope_var", None)
+        if not scope_v:
+            return
+        s = scope_v.get()
+        val = self.folder_path_var.get().strip()
+        if s == "project":
+            if val:
+                p = Path(val)
+                self.project_folder = p
+                self.bepinex_project_folder = p
+                text_dir = p / "Text"
+                root = text_dir if text_dir.exists() else p
+                if root.exists() and root not in self.xuat_search_roots:
+                    self.xuat_search_roots.insert(0, root)
+        elif s == "folder":
+            if val:
+                self.selected_search_folder = Path(val)
 
     def _sync_scope_widgets(self) -> None:
         """Update folder/project path entry and browse button based on scope selection."""
         if not (hasattr(self, "folder_path_entry") and hasattr(self, "btn_browse_search_folder")):
             return
         scope = self.scope_var.get()
-        if scope == "folder":
-            self.folder_path_entry.config(state="normal")
-            self.btn_browse_search_folder.config(state="normal")
-            if getattr(self, "selected_search_folder", None):
-                self.folder_path_var.set(str(self.selected_search_folder))
-            else:
-                self.folder_path_var.set("")
-        elif scope == "project":
-            self.folder_path_entry.config(state="normal")
-            self.btn_browse_search_folder.config(state="normal")
-            self.folder_path_var.set(self._get_project_display_path())
-        else:  # "current"
-            if getattr(self, "current_file_path", None):
-                self.folder_path_var.set(str(self.current_file_path.parent))
-            elif getattr(self, "open_documents", None) and self.open_documents:
-                first_path = next(iter(self.open_documents.keys()))
-                self.folder_path_var.set(str(first_path.parent) if isinstance(first_path, Path) else "(Current Open Files)")
-            else:
-                self.folder_path_var.set("(Current Open Files)")
-            self.folder_path_entry.config(state="readonly")
-            self.btn_browse_search_folder.config(state="disabled")
+        self._syncing_folder_path_var = True
+        try:
+            if scope == "folder":
+                self.folder_path_entry.config(state="normal")
+                self.btn_browse_search_folder.config(state="normal")
+                if getattr(self, "selected_search_folder", None):
+                    self.folder_path_var.set(str(self.selected_search_folder))
+                else:
+                    self.folder_path_var.set("")
+            elif scope == "project":
+                self.folder_path_entry.config(state="normal")
+                self.btn_browse_search_folder.config(state="normal")
+                self.folder_path_var.set(self._get_project_display_path())
+            else:  # "current"
+                if getattr(self, "current_file_path", None):
+                    self.folder_path_var.set(str(self.current_file_path.parent))
+                elif getattr(self, "open_documents", None) and self.open_documents:
+                    first_path = next(iter(self.open_documents.keys()))
+                    self.folder_path_var.set(str(first_path.parent) if isinstance(first_path, Path) else "(Current Open Files)")
+                else:
+                    self.folder_path_var.set("(Current Open Files)")
+                self.folder_path_entry.config(state="readonly")
+                self.btn_browse_search_folder.config(state="disabled")
+        finally:
+            self._syncing_folder_path_var = False
 
     def on_browse_scope_path(self) -> None:
         """Browse button handler for the active search scope ([...] on left of directory entry)."""
@@ -6286,11 +6338,12 @@ class MisoraApp(tk.Tk):
             self.on_open_folder()
 
     def on_browse_project_folder(self) -> None:
-        """Browse and configure the BepInEx Project Folder."""
-        init_dir = str(self.bepinex_project_folder) if getattr(self, "bepinex_project_folder", None) and self.bepinex_project_folder.exists() else str(SCRIPT_DIR.parent)
-        d = filedialog.askdirectory(initialdir=init_dir, title="Select BepInEx Project / Root Folder")
+        """Browse and configure the Project Root / Mod Translation Folder."""
+        init_dir = self._get_project_display_path()
+        d = filedialog.askdirectory(initialdir=init_dir, title="Select Project Root / Mod Folder (BepInEx, MelonLoader, etc.)")
         if d:
             p = Path(d)
+            self.project_folder = p
             self.bepinex_project_folder = p
             self.folder_path_var.set(str(p))
             text_dir = p / "Text"
@@ -6489,6 +6542,12 @@ class MisoraApp(tk.Tk):
                     return
             else:
                 target_roots = list(self.xuat_search_roots)
+                active_proj = getattr(self, "project_folder", None) or getattr(self, "bepinex_project_folder", None)
+                if active_proj and active_proj.exists():
+                    text_dir = active_proj / "Text"
+                    root = text_dir if text_dir.exists() else active_proj
+                    if root not in target_roots:
+                        target_roots.insert(0, root)
 
             inc_bdl = self.var_inc_bundles.get()
             inc_txt = self.var_inc_text.get()
@@ -7003,24 +7062,42 @@ class MisoraApp(tk.Tk):
         bak_dir = self._get_backup_dir()
         subprocess.Popen(["explorer.exe", str(bak_dir)])
 
-    def on_open_bepinex_folder(self) -> None:
-        if self.bepinex_project_folder and Path(self.bepinex_project_folder).exists():
-            subprocess.Popen(["explorer.exe", str(self.bepinex_project_folder)])
+    def on_open_project_folder(self) -> None:
+        """Open the Project Root / Mod Translation directory in Windows Explorer."""
+        p = getattr(self, "project_folder", None) or getattr(self, "bepinex_project_folder", None)
+        if not p or not Path(p).exists():
+            if getattr(self, "xuat_search_roots", None) and self.xuat_search_roots:
+                p = self.xuat_search_roots[0]
+        if p and Path(p).exists():
+            subprocess.Popen(["explorer.exe", str(p)])
         else:
-            ans = messagebox.askyesno("BepInEx Folder", "BepInEx translation folder is not set. Configure it now?")
+            ans = messagebox.askyesno("Project Folder", "Project / Mod translation folder is not set. Configure it now?")
             if ans:
                 self.on_open_paths_dialog()
+
+    def on_open_bepinex_folder(self) -> None:
+        """Backward-compatible alias for on_open_project_folder."""
+        self.on_open_project_folder()
 
     def on_open_program_folder(self) -> None:
         subprocess.Popen(["explorer.exe", str(SCRIPT_DIR)])
 
     def on_open_xuat_text_folder(self) -> None:
-        """Open the XUAT Text translation directory in Windows Explorer."""
+        """Open the Text translation directory in Windows Explorer (supports XUAT, MelonLoader, BepInEx)."""
         p: Optional[Path] = None
-        if self.bepinex_project_folder:
-            cand = self.bepinex_project_folder / "Text"
-            if cand.is_dir():
-                p = cand
+        proj = getattr(self, "project_folder", None) or getattr(self, "bepinex_project_folder", None)
+        if proj:
+            proj_path = Path(proj)
+            candidates = [
+                proj_path / "Text",
+                proj_path if proj_path.name.lower() == "text" else None,
+                proj_path / "Translation" / "en" / "Text",
+                proj_path / "UserData" / "Text",
+            ]
+            for cand in candidates:
+                if cand and cand.is_dir():
+                    p = cand
+                    break
         if not p and getattr(self, "xuat_search_roots", None):
             for r in self.xuat_search_roots:
                 if r.is_dir():
@@ -7033,22 +7110,29 @@ class MisoraApp(tk.Tk):
         if p and p.exists():
             subprocess.Popen(["explorer.exe", str(p)])
         else:
-            messagebox.showinfo("XUAT Text Folder", "XUAT Text folder could not be found. Configure the BepInEx Project Folder in 'Configure Paths & Backups...'.")
+            messagebox.showinfo("Text Translation Folder", "Text translation folder could not be found. Configure the Project / Mod Folder in 'Configure Paths & Backups...'.")
 
     def on_open_redirected_resources_folder(self) -> None:
-        """Open the BepInEx RedirectedResources directory in Windows Explorer."""
+        """Open the RedirectedResources directory in Windows Explorer (supports BepInEx, MelonLoader, custom)."""
         p: Optional[Path] = None
-        if self.bepinex_project_folder:
-            cand1 = self.bepinex_project_folder / "RedirectedResources"
-            cand2 = self.bepinex_project_folder.parent / "RedirectedResources"
-            if cand1.is_dir():
-                p = cand1
-            elif cand2.is_dir():
-                p = cand2
+        proj = getattr(self, "project_folder", None) or getattr(self, "bepinex_project_folder", None)
+        if proj:
+            proj_path = Path(proj)
+            candidates = [
+                proj_path / "RedirectedResources",
+                proj_path.parent / "RedirectedResources",
+                proj_path / "Translation" / "en" / "RedirectedResources",
+                proj_path / "UserData" / "RedirectedResources",
+                proj_path / "Mods" / "RedirectedResources",
+            ]
+            for cand in candidates:
+                if cand.is_dir():
+                    p = cand
+                    break
         if p and p.exists():
             subprocess.Popen(["explorer.exe", str(p)])
         else:
-            messagebox.showinfo("RedirectedResources Folder", "RedirectedResources folder could not be found. Configure the BepInEx Project Folder in 'Configure Paths & Backups...'.")
+            messagebox.showinfo("Redirected Resources Folder", "RedirectedResources folder could not be found. Configure the Project / Mod Folder in 'Configure Paths & Backups...'.")
 
     def on_open_selected_search_folder(self) -> None:
         """Open the currently selected search folder in Windows Explorer."""
@@ -7058,12 +7142,12 @@ class MisoraApp(tk.Tk):
             messagebox.showinfo("Search Folder", "No search folder is currently set. Choose one using the [...] button in the search bar or drag & drop a folder.")
 
     def on_open_paths_dialog(self) -> None:
-        """Dialog to configure Backup Folder, BepInEx Folder, Datamine Tool, External Editors, Config, and Debug Log."""
+        """Dialog to configure Backup Folder, Project/Mod Folder, Datamine Tool, External Editors, Config, and Debug Log."""
         t = self.theme
         dlg = tk.Toplevel(self)
         dlg.title("Configure Paths, Backups & Folders")
-        dlg.geometry("660x520")
-        dlg.minsize(600, 460)
+        dlg.geometry("660x540")
+        dlg.minsize(600, 480)
         dlg.transient(self)
         dlg.grab_set()
         dlg.configure(bg=t["bg_panel"])
@@ -7125,23 +7209,33 @@ class MisoraApp(tk.Tk):
         )
         cb_bak.pack(anchor="w", padx=(170, 0), pady=(0, 6))
 
-        # 2. BepInEx Project Folder
-        def _browse_bepinex():
-            d = filedialog.askdirectory(title="Select BepInEx Translation Folder")
+        # 2. Project / Mod Root Folder (BepInEx, MelonLoader, XUAT, custom)
+        def _browse_project():
+            init_d = ent_project.get().strip() or self._get_project_display_path()
+            d = filedialog.askdirectory(initialdir=init_d, title="Select Project Root / Mod Folder (BepInEx, MelonLoader, etc.)")
             if d:
-                ent_bepinex.delete(0, tk.END)
-                ent_bepinex.insert(0, d)
+                ent_project.delete(0, tk.END)
+                ent_project.insert(0, d)
 
-        def _open_bep_folder():
-            b = ent_bepinex.get().strip()
+        def _open_project_folder_ui():
+            b = ent_project.get().strip() or self._get_project_display_path()
             if b and Path(b).exists():
                 subprocess.Popen(["explorer.exe", str(b)])
             else:
-                messagebox.showinfo("BepInEx Folder", "Folder does not exist.")
+                messagebox.showinfo("Project Folder", "Folder does not exist.")
 
-        r2, ent_bepinex = make_row(content, "BepInEx Project Folder:", browse_cmd=_browse_bepinex, open_cmd=_open_bep_folder)
-        if self.bepinex_project_folder:
-            ent_bepinex.insert(0, str(self.bepinex_project_folder))
+        r2, ent_project = make_row(content, "Project / Mod Folder:", browse_cmd=_browse_project, open_cmd=_open_project_folder_ui)
+        cur_proj = str(self.project_folder) if getattr(self, "project_folder", None) else self._get_project_display_path()
+        ent_project.insert(0, cur_proj)
+
+        lbl_proj_hint = tk.Label(
+            content,
+            text="Root directory for translation/mod project (BepInEx, MelonLoader, XUAT, etc.)",
+            font=("Segoe UI", 8),
+            bg=t["bg_panel"],
+            fg=t["fg_muted"]
+        )
+        lbl_proj_hint.pack(anchor="w", padx=(170, 0), pady=(0, 6))
 
         # 3. Universal Datamine Tool
         def _browse_datamine():
@@ -7210,15 +7304,16 @@ class MisoraApp(tk.Tk):
                 b_val = ent_backup.get().strip()
                 self.backup_folder = Path(b_val) if b_val else None
 
-            bep_val = ent_bepinex.get().strip()
-            self.bepinex_project_folder = Path(bep_val) if bep_val else None
-            if self.bepinex_project_folder and self.bepinex_project_folder.exists():
-                text_dir = self.bepinex_project_folder / "Text"
-                root = text_dir if text_dir.exists() else self.bepinex_project_folder
+            proj_val = ent_project.get().strip()
+            self.project_folder = Path(proj_val) if proj_val else None
+            self.bepinex_project_folder = self.project_folder
+            if self.project_folder and self.project_folder.exists():
+                text_dir = self.project_folder / "Text"
+                root = text_dir if text_dir.exists() else self.project_folder
                 if root not in self.xuat_search_roots:
                     self.xuat_search_roots.insert(0, root)
                 if self.scope_var.get() == "project":
-                    self.folder_path_var.set(str(self.bepinex_project_folder))
+                    self.folder_path_var.set(str(self.project_folder))
 
             dm_val = ent_datamine.get().strip()
             self.datamine_exe = Path(dm_val) if dm_val else None
@@ -7233,6 +7328,11 @@ class MisoraApp(tk.Tk):
             self.lbl_status.config(text="Updated paths and backup configuration.")
             self.show_toast("Paths and backup settings saved successfully!")
             dlg.destroy()
+            messagebox.showinfo(
+                "Settings Saved",
+                "Paths, backups, and preferences have been saved successfully.",
+                parent=self,
+            )
 
         ttk.Button(btn_bar, text="Cancel", style="TButton", command=dlg.destroy).pack(side="right", padx=4)
         ttk.Button(btn_bar, text="Save & Apply", style="Pink.TButton", command=_save_and_close).pack(side="right", padx=4)
@@ -7748,6 +7848,11 @@ class MTLSettingsDialog(tk.Toplevel):
         self.app._save_user_prefs()
         self.app.show_toast(f"✓ Saved MTL preferences ({self.app.mtl_config.active_engine})")
         self.destroy()
+        messagebox.showinfo(
+            "Settings Saved",
+            f"Machine Translation settings ({self.app.mtl_config.active_engine}) have been saved.",
+            parent=self.app,
+        )
 
 
 class AIPromptSettingsDialog(tk.Toplevel):
@@ -7867,6 +7972,11 @@ class AIPromptSettingsDialog(tk.Toplevel):
         self._apply_settings_to_app()
         self.app.show_toast("✓ Saved AI prompt configuration")
         self.destroy()
+        messagebox.showinfo(
+            "Settings Saved",
+            "AI translation prompt header & settings have been saved.",
+            parent=self.app,
+        )
 
 
 class TranslatorAssistantDialog(tk.Toplevel):
