@@ -1,21 +1,29 @@
 # MISORA — PROJECT STATE
-*Last updated: 2026-11-18 — Bug #12 (NGUI Color Window) verified by user; Bug #1 (DnD safety & folder support) + Bug #2 (Config persistence) implemented*
+*Last updated: 2026-11-18 — Bug #12 verified; Bug #1 (DnD safety & folder support) + Bug #2 (Config persistence) + Scope radiobuttons + Customize drawer fixes implemented*
 
 ---
 
 ## SESSION HANDOFF / RESUME INSTRUCTIONS
 **Current step:**
 1. Bug #12 (NGUI Color & Gradient Picker): Confirmed working and complete by user ("yes it complete and work well").
-2. Bug #1 (Drag & Drop Enhancements) & Bug #2 (Config Persistence) implemented in commit `0e1753a`:
-   - Folder drop: Prompts with Yes/No/Cancel dialog (Open all files in tabs / Open first file only & set search scope / Set search scope only).
+2. Bug #1 (Drag & Drop Enhancements) & Bug #2 (Config Persistence) implemented:
+   - Folder drop: Clear prompt (Open all files in tabs / Set search scope to folder / Abort & do nothing).
    - DnD safety: Batch threshold (warns if >10 files) and file size threshold (warns if >25 MB).
-   - Binary file filter: Blocks non-story binary formats (`.exe`, `.dll`, media, archives, images) from accidentally opening as garbled text.
+   - Binary file filter: Blocks non-story binary formats (`.exe`, `.dll`, media, archives, images).
    - Force Open: Added `File -> Force Open Any File...` to explicitly bypass extension filters.
-   - DnD settings dialog: Added `Debug -> Drag & Drop Safety Settings...` to customize thresholds or disable them (set to 0).
+   - DnD settings dialog: Added `Debug -> Drag & Drop Safety Settings...` with confirmation toast upon save.
    - Config persistence: Geometry, continuous view toggle, sync XUAT toggle, and DnD thresholds persist in `misora_config.json`.
-3. Unit tests: 11/11 passing.
+3. Scope Radiobuttons Fix (`316b33f`):
+   - Converted Scope selection from classic `tk.Radiobutton` to themed `ttk.Radiobutton` (`Panel.TRadiobutton`).
+   - Completely resolved the visual bug where all three radio buttons showed filled dots.
+   - Verified: Only the single active scope option shows selected state (`('selected',)`).
+4. Customize Drawer Fixes:
+   - Bound `<<ComboboxSelected>>` to theme presets combobox for instant live theme preview.
+   - `cust_menu` "Display & Theme Settings..." now cleanly toggles the side drawer (`_toggle_side_drawer("customize")`).
+   - `_reset_customization_defaults` explicitly updates all hex entry variables and resets theme presets.
+5. Unit tests: 11/11 passing.
 
-**Next action:** Await user verification of the new DnD & config persistence features, then proceed to next bugs/features (e.g. Bug #15 plain .txt save verification, Bug #9 view toggle scroll sync, Bug #6 ribbon button widths).
+**Next action:** Await user live verification of Scope radio buttons and Customize drawer, then proceed to Bug #15 (Plain `.txt` save verification) or next priority tasks.
 
 ---
 
