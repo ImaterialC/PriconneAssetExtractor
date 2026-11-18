@@ -1008,6 +1008,9 @@ class MisoraApp(tk.Tk):
         self.mtl_config: MTLConfig = MTLConfig()
         self._translator_dialog: Optional[Any] = None
         self._side_drawer_pinned: bool = False
+        self.dnd_batch_threshold: int = 10
+        self.dnd_size_threshold_mb: float = 25.0
+        self.dnd_filter_binary: bool = True
 
         _rpt(0.25, "Loading saved preferences…")
         # Load persistent user preferences (fonts, theme colors, paths, mtl settings)
@@ -1124,6 +1127,17 @@ class MisoraApp(tk.Tk):
 
         _rpt(1.00, "Ready!")
         self.logger.info("UI / Theme / Config", f"Misora initialized. Config path: {CONFIG_PATH}")
+
+        # Restore saved window geometry and view toggles (Bug #2)
+        if hasattr(self, "_saved_geometry") and self._saved_geometry:
+            try:
+                self.geometry(self._saved_geometry)
+            except Exception:
+                pass
+        if hasattr(self, "_saved_continuous_view") and hasattr(self, "var_continuous_view"):
+            self.var_continuous_view.set(self._saved_continuous_view)
+        if hasattr(self, "_saved_sync_xuat") and hasattr(self, "var_sync_xuat"):
+            self.var_sync_xuat.set(self._saved_sync_xuat)
 
         # Reveal the main window (was hidden during splash)
         self.deiconify()
@@ -1259,6 +1273,18 @@ class MisoraApp(tk.Tk):
                     self.show_column_ruler = raw["show_column_ruler"]
                 if isinstance(raw.get("mtl"), dict):
                     self.mtl_config = MTLConfig.from_dict(raw["mtl"])
+                if isinstance(raw.get("dnd_batch_threshold"), int):
+                    self.dnd_batch_threshold = max(0, raw["dnd_batch_threshold"])
+                if isinstance(raw.get("dnd_size_threshold_mb"), (int, float)):
+                    self.dnd_size_threshold_mb = max(0.0, float(raw["dnd_size_threshold_mb"]))
+                if isinstance(raw.get("dnd_filter_binary"), bool):
+                    self.dnd_filter_binary = raw["dnd_filter_binary"]
+                if isinstance(raw.get("window_geometry"), str) and raw["window_geometry"].strip():
+                    self._saved_geometry = raw["window_geometry"].strip()
+                if isinstance(raw.get("continuous_view"), bool):
+                    self._saved_continuous_view = raw["continuous_view"]
+                if isinstance(raw.get("sync_xuat"), bool):
+                    self._saved_sync_xuat = raw["sync_xuat"]
             except Exception as exc:
                 self.logger.warning("UI / Theme / Config", f"Failed to parse {CONFIG_PATH}: {exc}")
         return prefs
@@ -1301,6 +1327,14 @@ class MisoraApp(tk.Tk):
                 "show_column_ruler": bool(self.var_show_column_ruler.get()) if hasattr(self, "var_show_column_ruler") else self.show_column_ruler,
                 # MTL translation configuration
                 "mtl": self.mtl_config.to_dict() if hasattr(self, "mtl_config") else {},
+                # Drag & Drop safety configuration
+                "dnd_batch_threshold": getattr(self, "dnd_batch_threshold", 10),
+                "dnd_size_threshold_mb": getattr(self, "dnd_size_threshold_mb", 25.0),
+                "dnd_filter_binary": getattr(self, "dnd_filter_binary", True),
+                # Window geometry & view toggles (Bug #2)
+                "window_geometry": self.geometry() if hasattr(self, "geometry") else "",
+                "continuous_view": bool(self.var_continuous_view.get()) if hasattr(self, "var_continuous_view") else False,
+                "sync_xuat": bool(self.var_sync_xuat.get()) if hasattr(self, "var_sync_xuat") else True,
             }
             CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
             tmp_path = CONFIG_PATH.with_suffix(".json.tmp")
@@ -1773,52 +1807,189 @@ class MisoraApp(tk.Tk):
         except Exception:
             pass
 
-    def _handle_dropped_paths(self, paths: List[Path]) -> None:
-        """Process files or folders dropped onto the Misora window safely.
+    def on_force_open_file(self) -> None:
+        """Prompt user to open ANY file (bypassing format/extension guards) as raw/plain text."""
+        p = filedialog.askopenfilename(
+            title="Force Open Any File (Raw / Plain Text)",
+            filetypes=[("All Files (*.*)", "*.*")],
+            initialdir=str(self.last_opened_dir) if getattr(self, "last_opened_dir", None) else None,
+        )
+        if p:
+            self.open_file(Path(p))
 
-        Bug 1 fix: Open ALL dropped files with supported extensions (not just first).
-        Bug 2 fix: When a folder is dropped, scan it for story files and open the first.
-        Bug 3 fix: Reset _dnd_in_progress at start to handle previous crash recovery.
-        """
+    def _check_batch_safety(self, files: List[Path]) -> bool:
+        """Prompt confirmation if dropping many files or very large files."""
+        batch_thresh = getattr(self, "dnd_batch_threshold", 10)
+        size_thresh_mb = getattr(self, "dnd_size_threshold_mb", 25.0)
+
+        # 1. Batch count check
+        if batch_thresh > 0 and len(files) > batch_thresh:
+            ok = messagebox.askyesno(
+                "Confirm Large Batch",
+                f"You are about to open {len(files)} files at once.\n\n"
+                f"Opening many files may take a few moments. Proceed?",
+                default=messagebox.YES,
+            )
+            if not ok:
+                return False
+
+        # 2. File size check
+        if size_thresh_mb > 0:
+            large_files: List[Tuple[Path, float]] = []
+            for f in files:
+                try:
+                    sz_mb = f.stat().st_size / (1024 * 1024)
+                    if sz_mb >= size_thresh_mb:
+                        large_files.append((f, sz_mb))
+                except Exception:
+                    pass
+            if large_files:
+                sample_list = "\n".join(f"• {f.name} ({sz:.1f} MB)" for f, sz in large_files[:5])
+                if len(large_files) > 5:
+                    sample_list += f"\n• ... and {len(large_files) - 5} more"
+                ok = messagebox.askyesno(
+                    "Confirm Large File(s)",
+                    f"The following file(s) exceed {size_thresh_mb:g} MB:\n\n"
+                    f"{sample_list}\n\n"
+                    f"Opening very large files may consume extra memory. Proceed?",
+                    default=messagebox.YES,
+                )
+                if not ok:
+                    return False
+        return True
+
+    def _on_dnd_settings_dialog(self) -> None:
+        """Dialog to configure Drag & Drop safety thresholds and filters."""
+        t = self.theme
+        dlg = tk.Toplevel(self)
+        dlg.title("Drag & Drop Safety Settings")
+        dlg.geometry("480x280")
+        dlg.minsize(440, 240)
+        dlg.transient(self)
+        dlg.grab_set()
+        dlg.configure(bg=t["bg_panel"])
+
+        fg_panel = best_contrast_fg(t["bg_panel"])
+        fg_editor = best_contrast_fg(t["bg_editor"])
+
+        content = tk.Frame(dlg, bg=t["bg_panel"], padx=18, pady=16)
+        content.pack(fill="both", expand=True)
+
+        tk.Label(
+            content,
+            text="Drag & Drop Safety Settings",
+            font=("Segoe UI", 11, "bold"),
+            bg=t["bg_panel"],
+            fg=t["misora_pink"],
+        ).pack(anchor="w", pady=(0, 10))
+
+        var_filter = tk.BooleanVar(master=dlg, value=getattr(self, "dnd_filter_binary", True))
+        cb = tk.Checkbutton(
+            content,
+            text="Filter out binary files (.exe, .dll, images, media, archives) on drop",
+            variable=var_filter,
+            font=("Segoe UI", 9),
+            bg=t["bg_panel"],
+            fg=fg_panel,
+            selectcolor=t["bg_dark"],
+        )
+        cb.pack(anchor="w", pady=(0, 10))
+
+        # Row 1: Batch threshold
+        r1 = tk.Frame(content, bg=t["bg_panel"])
+        r1.pack(fill="x", pady=4)
+        tk.Label(r1, text="Batch prompt threshold (files):", font=("Segoe UI", 9), bg=t["bg_panel"], fg=fg_panel, width=28, anchor="w").pack(side="left")
+        var_batch = tk.StringVar(master=dlg, value=str(getattr(self, "dnd_batch_threshold", 10)))
+        ent_batch = tk.Entry(r1, textvariable=var_batch, width=8, font=("Segoe UI", 9), bg=t["bg_editor"], fg=fg_editor, bd=1, relief="solid")
+        ent_batch.pack(side="left", padx=4)
+        tk.Label(r1, text="(0 = never prompt)", font=("Segoe UI", 8), bg=t["bg_panel"], fg=t["fg_muted"]).pack(side="left", padx=4)
+
+        # Row 2: Size threshold
+        r2 = tk.Frame(content, bg=t["bg_panel"])
+        r2.pack(fill="x", pady=4)
+        tk.Label(r2, text="Large file threshold (MB):", font=("Segoe UI", 9), bg=t["bg_panel"], fg=fg_panel, width=28, anchor="w").pack(side="left")
+        var_size = tk.StringVar(master=dlg, value=str(getattr(self, "dnd_size_threshold_mb", 25.0)))
+        ent_size = tk.Entry(r2, textvariable=var_size, width=8, font=("Segoe UI", 9), bg=t["bg_editor"], fg=fg_editor, bd=1, relief="solid")
+        ent_size.pack(side="left", padx=4)
+        tk.Label(r2, text="(0 = never prompt)", font=("Segoe UI", 8), bg=t["bg_panel"], fg=t["fg_muted"]).pack(side="left", padx=4)
+
+        # Bottom buttons
+        btn_bar = tk.Frame(dlg, bg=t["bg_panel"], padx=18, pady=12)
+        btn_bar.pack(fill="x", side="bottom")
+
+        def _save():
+            try:
+                b_val = max(0, int(var_batch.get().strip()))
+            except ValueError:
+                b_val = 10
+            try:
+                s_val = max(0.0, float(var_size.get().strip()))
+            except ValueError:
+                s_val = 25.0
+            self.dnd_batch_threshold = b_val
+            self.dnd_size_threshold_mb = s_val
+            self.dnd_filter_binary = bool(var_filter.get())
+            self._save_user_prefs(silent=True)
+            self.lbl_status.config(text="Drag & drop safety settings saved.")
+            dlg.destroy()
+
+        ttk.Button(btn_bar, text="Save Settings", style="Accent.TButton", command=_save).pack(side="left", padx=(0, 6))
+        ttk.Button(btn_bar, text="Cancel", style="TButton", command=dlg.destroy).pack(side="left")
+
+    def _handle_dropped_paths(self, paths: List[Path]) -> None:
+        """Process files or folders dropped onto the Misora window safely."""
         self._dnd_in_progress = False  # reset early so crashes don't lock DnD
         try:
             if not paths:
                 return
             self.logger.info("Drag & Drop", f"Received {len(paths)} dropped item(s): {[str(p) for p in paths]}")
 
-            preferred_exts = {".unity3d", ".asset", ".txt", ".json", ".csv", ".tsv"}
+            known_binary_exts = {
+                ".exe", ".dll", ".so", ".dylib", ".bin", ".dat",
+                ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".tga",
+                ".zip", ".7z", ".rar", ".tar", ".gz", ".bz2",
+                ".db", ".sqlite", ".db3",
+                ".mp3", ".wav", ".ogg", ".flac", ".aac",
+                ".mp4", ".mkv", ".avi", ".mov", ".usm",
+                ".pdf", ".doc", ".docx", ".xls", ".xlsx"
+            }
+
             files = [p for p in paths if p.is_file()]
             dirs = [p for p in paths if p.is_dir()]
 
-            opened = 0
-            skipped = 0
-
+            # 1. Process dropped files
             if files:
-                # Open every supported file — not just the first
-                for f in files:
-                    if f.suffix.lower() in preferred_exts:
-                        try:
-                            self.open_file(f)
-                            opened += 1
-                        except Exception as exc:  # noqa: BLE001
-                            self.logger.error("Drag & Drop", f"Could not open {f.name}: {exc}")
-                            skipped += 1
-                    else:
-                        skipped += 1
-                if opened == 0 and files:
-                    # Fall back to first file even if unsupported extension
-                    try:
-                        self.open_file(files[0])
-                        opened += 1
-                    except Exception as exc:  # noqa: BLE001
-                        self.logger.error("Drag & Drop", f"Could not open {files[0].name}: {exc}")
-                msg = f"Opened {opened} file(s) via drag & drop."
-                if skipped:
-                    msg += f" ({skipped} skipped / unsupported)"
-                self.lbl_status.config(text=msg)
+                filter_bin = getattr(self, "dnd_filter_binary", True)
+                if filter_bin:
+                    to_open = [f for f in files if f.suffix.lower() not in known_binary_exts]
+                    skipped = [f for f in files if f.suffix.lower() in known_binary_exts]
+                else:
+                    to_open = list(files)
+                    skipped = []
 
-            elif dirs:
-                # Bug 2: scan dropped folder for story files and open first found
+                if skipped and not to_open:
+                    self.lbl_status.config(
+                        text=f"Skipped {len(skipped)} binary/unsupported file(s). Use 'File -> Force Open Any File...' to override."
+                    )
+                    self.logger.warning("Drag & Drop", f"Skipped binary files: {[f.name for f in skipped]}")
+                elif to_open:
+                    if self._check_batch_safety(to_open):
+                        opened = 0
+                        for f in to_open:
+                            try:
+                                self.open_file(f)
+                                opened += 1
+                            except Exception as exc:  # noqa: BLE001
+                                self.logger.error("Drag & Drop", f"Could not open {f.name}: {exc}")
+                        msg = f"Opened {opened} file(s) via drag & drop."
+                        if skipped:
+                            msg += f" ({len(skipped)} binary file(s) skipped)"
+                        self.lbl_status.config(text=msg)
+                    else:
+                        self.lbl_status.config(text="File drop cancelled by user.")
+
+            # 2. Process dropped folder(s)
+            if dirs:
                 folder = dirs[0].resolve()
                 self.selected_search_folder = folder
                 self.scope_var.set("folder")
@@ -1827,24 +1998,58 @@ class MisoraApp(tk.Tk):
                     sorted(folder.glob("*.asset")) +
                     sorted(folder.glob("*.txt"))
                 )
-                if story_files:
-                    try:
-                        self.open_file(story_files[0])
-                        self.lbl_status.config(
-                            text=f"Opened \"{story_files[0].name}\" from folder ({len(story_files)} story file(s) found). Search scope set to this folder."
-                        )
-                    except Exception as exc:  # noqa: BLE001
-                        self.logger.error("Drag & Drop", f"Could not open folder file {story_files[0].name}: {exc}")
-                        self.lbl_status.config(
-                            text=f"Folder set for search: {folder} ({len(story_files)} file(s) found, could not open first)"
-                        )
-                else:
+                if not story_files:
                     self.lbl_status.config(
                         text=f"Folder set for search: {folder} (no .unity3d/.asset/.txt files found)"
                     )
+                elif len(story_files) == 1:
+                    try:
+                        self.open_file(story_files[0])
+                        self.lbl_status.config(
+                            text=f"Opened \"{story_files[0].name}\" from folder. Search scope set."
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        self.logger.error("Drag & Drop", f"Could not open {story_files[0].name}: {exc}")
+                else:
+                    ans = messagebox.askyesnocancel(
+                        "Open Folder Story Files",
+                        f"Found {len(story_files)} story files in folder:\n'{folder.name}'\n\n"
+                        f"• Yes: Open all {len(story_files)} files into tabs\n"
+                        f"• No: Open only the first file ('{story_files[0].name}') and set search scope\n"
+                        f"• Cancel: Only set search scope (open nothing)",
+                        default=messagebox.YES,
+                    )
+                    if ans is True:
+                        if self._check_batch_safety(story_files):
+                            opened = 0
+                            for sf in story_files:
+                                try:
+                                    self.open_file(sf)
+                                    opened += 1
+                                except Exception as exc:  # noqa: BLE001
+                                    self.logger.error("Drag & Drop", f"Could not open {sf.name}: {exc}")
+                            self.lbl_status.config(
+                                text=f"Opened {opened} file(s) from folder. Search scope set to: {folder.name}"
+                            )
+                        else:
+                            self.lbl_status.config(text=f"Folder set for search: {folder.name}")
+                    elif ans is False:
+                        try:
+                            self.open_file(story_files[0])
+                            self.lbl_status.config(
+                                text=f"Opened \"{story_files[0].name}\" ({len(story_files)} files in folder). Search scope set."
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            self.logger.error("Drag & Drop", f"Could not open {story_files[0].name}: {exc}")
+                    else:
+                        self.lbl_status.config(
+                            text=f"Folder set for search: {folder.name} ({len(story_files)} story files found)."
+                        )
         except Exception as exc:
             self.logger.exception("Error while handling dropped path(s):", exc)
             messagebox.showerror("Drag & Drop Error", f"Failed to open dropped item:\n{exc}")
+        finally:
+            self._dnd_in_progress = False
 
     # -------------------------------------------------------------------------
     # Environment & WCAG Contrast-Safe ttk Styling (#13, #4, #7)
@@ -2114,6 +2319,7 @@ class MisoraApp(tk.Tk):
 
         file_menu = tk.Menu(menubar, tearoff=0, bg=t["bg_panel"], fg=panel_fg, activebackground=t["misora_pink"], activeforeground=accent_fg)
         file_menu.add_command(label="Open File...", command=self.on_open_file, accelerator="Ctrl+O")
+        file_menu.add_command(label="Force Open Any File...", command=self.on_force_open_file)
         file_menu.add_command(label="Open Folder...", command=self.on_open_folder, accelerator="Ctrl+Shift+O")
 
         self.recent_menu = tk.Menu(file_menu, tearoff=0, bg=t["bg_panel"], fg=panel_fg, activebackground=t["misora_pink"], activeforeground=accent_fg, postcommand=self._sync_recent_files_menu)
@@ -2423,6 +2629,8 @@ class MisoraApp(tk.Tk):
         self.debug_menu.add_command(label="Open Log File", command=self._on_open_debug_log_file)
         self._idx_clear_log = self.debug_menu.index("end") + 1
         self.debug_menu.add_command(label="Clear Log File", command=self._on_clear_debug_log_file)
+        self.debug_menu.add_separator()
+        self.debug_menu.add_command(label="Drag & Drop Safety Settings...", command=self._on_dnd_settings_dialog)
 
         menubar.add_cascade(label="Debug", menu=self.debug_menu)
         self._all_menus.append(self.debug_menu)
