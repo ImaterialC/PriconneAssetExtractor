@@ -388,42 +388,54 @@ class NguiColorPickerPopup(tk.Toplevel):
         super().__init__(parent)
         self.app = parent
         self.theme = parent.theme
-        self.title("NGUI Color & Gradient Picker")
+        self.title("NGUI Color & Gradient Picker (v1.3.3)")
         self.configure(bg=self.theme["bg_panel"])
         self.transient(parent)
 
-        self.stop_colors: List[str] = [
-            primary_hex.lower() if HEX_COLOR_RE.match(primary_hex) else "#7b42bc",
-            secondary_hex.lower() if HEX_COLOR_RE.match(secondary_hex) else "#ff7da7",
-        ]
-        self.active_stop: int = 0
-        self._eyedropper_active: bool = False
-        self._eyedropper_after_id: Optional[str] = None
-        self._mouse_was_down: bool = False
+        try:
+            self.stop_colors: List[str] = [
+                primary_hex.lower() if HEX_COLOR_RE.match(primary_hex) else "#7b42bc",
+                secondary_hex.lower() if HEX_COLOR_RE.match(secondary_hex) else "#ff7da7",
+            ]
+            self.active_stop: int = 0
+            self._eyedropper_active: bool = False
+            self._eyedropper_after_id: Optional[str] = None
+            self._mouse_was_down: bool = False
 
-        r = int(self.stop_colors[0][1:3], 16) / 255.0
-        g = int(self.stop_colors[0][3:5], 16) / 255.0
-        b = int(self.stop_colors[0][5:7], 16) / 255.0
-        self._h, self._s, self._v = colorsys.rgb_to_hsv(r, g, b)
+            r = int(self.stop_colors[0][1:3], 16) / 255.0
+            g = int(self.stop_colors[0][3:5], 16) / 255.0
+            b = int(self.stop_colors[0][5:7], 16) / 255.0
+            self._h, self._s, self._v = colorsys.rgb_to_hsv(r, g, b)
 
-        self._sv_photo: Any = None
-        self._hue_photo: Any = None
-        self._grad_photo: Any = None
+            self._sv_photo: Any = None
+            self._hue_photo: Any = None
+            self._grad_photo: Any = None
 
-        self._build_ui()
-        self._render_hue_bar()
-        self._render_sv_map()
-        self._sync_ui_from_hsv()
+            self._build_ui()
+            self._render_hue_bar()
+            self._render_sv_map()
+            self._sync_ui_from_hsv()
 
-        self.update_idletasks()
-        req_w = max(400, self.winfo_reqwidth())
-        req_h = max(320, self.winfo_reqheight())
-        px = parent.winfo_rootx() + (parent.winfo_width() // 2) - (req_w // 2)
-        py = parent.winfo_rooty() + (parent.winfo_height() // 2) - (req_h // 2)
-        self.geometry(f"{req_w}x{req_h}+{max(20, px)}+{max(20, py)}")
-        self.minsize(req_w, req_h)
-        self.resizable(False, False)
-        self.app.logger.info("UI / Theme / Config", f"NguiColorPickerPopup initialized ({req_w}x{req_h})")
+            self.update_idletasks()
+            req_w = max(420, self.winfo_reqwidth())
+            req_h = max(340, self.winfo_reqheight())
+            px = parent.winfo_rootx() + (parent.winfo_width() // 2) - (req_w // 2)
+            py = parent.winfo_rooty() + (parent.winfo_height() // 2) - (req_h // 2)
+            self.geometry(f"{req_w}x{req_h}+{max(20, px)}+{max(20, py)}")
+            self.minsize(req_w, req_h)
+            self.resizable(False, False)
+            self.app.logger.info("UI / Theme / Config", f"NguiColorPickerPopup initialized ({req_w}x{req_h})")
+        except Exception:
+            import traceback
+            err = traceback.format_exc()
+            try:
+                self.app.logger.exception(f"NguiColorPickerPopup initialization failed:\n{err}")
+            except Exception:
+                pass
+            with open("picker_error.log", "w", encoding="utf-8") as f:
+                f.write(err)
+            messagebox.showerror("Color Picker Init Error", err)
+            raise
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.bind("<Escape>", self._on_escape)
@@ -652,19 +664,33 @@ class NguiColorPickerPopup(tk.Toplevel):
         self._sync_ui_from_hsv()
 
     def _render_hue_bar(self) -> None:
-        # Use tk.PhotoImage.put() for the hue bar unconditionally.
-        # Reason: canvas_hue is only 20px wide; at 125%+ Windows DPI scaling
-        # ImageTk.PhotoImage on a narrow canvas may not render (blank/white).
-        # At 20×140 = 2800 pixels the put() string is tiny and always works.
         w, h = self.HUE_W, self.HUE_H
-        img = tk.PhotoImage(master=self, width=w, height=h)
-        rows: List[str] = []
-        for y in range(h):
-            hue = y / max(1, h - 1)
-            r, g, b = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
-            hx = f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
-            rows.append("{" + " ".join([hx] * w) + "}")
-        img.put(" ".join(rows))
+        if Image is not None and ImageTk is not None:
+            raw = bytearray(w * h * 3)
+            h_denom = max(1, h - 1)
+            idx = 0
+            for y in range(h):
+                hue = y / h_denom
+                r, g, b = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
+                rb = int(r * 255)
+                gb = int(g * 255)
+                bb = int(b * 255)
+                for _ in range(w):
+                    raw[idx] = rb
+                    raw[idx + 1] = gb
+                    raw[idx + 2] = bb
+                    idx += 3
+            im = Image.frombytes("RGB", (w, h), bytes(raw))
+            img = ImageTk.PhotoImage(im, master=self)
+        else:
+            img = tk.PhotoImage(master=self, width=w, height=h)
+            rows: List[str] = []
+            for y in range(h):
+                hue = y / max(1, h - 1)
+                r, g, b = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
+                hx = f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
+                rows.append("{" + " ".join([hx] * w) + "}")
+            img.put(" ".join(rows))
         self._hue_photo = img
         self.canvas_hue.image = img
         self.canvas_hue.delete("all")
