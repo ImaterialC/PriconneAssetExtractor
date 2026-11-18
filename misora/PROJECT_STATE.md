@@ -1,29 +1,22 @@
 # MISORA — PROJECT STATE
-*Last updated: 2026-11-18 — Bug #12 verified; Bug #1 (DnD safety & folder support) + Bug #2 (Config persistence) + Scope radiobuttons + Customize drawer fixes implemented*
+*Last updated: 2026-11-18 — Bug #12 verified; DnD logic flow overhauled & Scope naming updated to "Current File(s)"*
 
 ---
 
 ## SESSION HANDOFF / RESUME INSTRUCTIONS
 **Current step:**
 1. Bug #12 (NGUI Color & Gradient Picker): Confirmed working and complete by user ("yes it complete and work well").
-2. Bug #1 (Drag & Drop Enhancements) & Bug #2 (Config Persistence) implemented:
-   - Folder drop: Clear prompt (Open all files in tabs / Set search scope to folder / Abort & do nothing).
-   - DnD safety: Batch threshold (warns if >10 files) and file size threshold (warns if >25 MB).
-   - Binary file filter: Blocks non-story binary formats (`.exe`, `.dll`, media, archives, images).
-   - Force Open: Added `File -> Force Open Any File...` to explicitly bypass extension filters.
-   - DnD settings dialog: Added `Debug -> Drag & Drop Safety Settings...` with confirmation toast upon save.
-   - Config persistence: Geometry, continuous view toggle, sync XUAT toggle, and DnD thresholds persist in `misora_config.json`.
-3. Scope Radiobuttons Fix (`316b33f`):
-   - Converted Scope selection from classic `tk.Radiobutton` to themed `ttk.Radiobutton` (`Panel.TRadiobutton`).
-   - Completely resolved the visual bug where all three radio buttons showed filled dots.
-   - Verified: Only the single active scope option shows selected state (`('selected',)`).
-4. Customize Drawer Fixes:
-   - Bound `<<ComboboxSelected>>` to theme presets combobox for instant live theme preview.
-   - `cust_menu` "Display & Theme Settings..." now cleanly toggles the side drawer (`_toggle_side_drawer("customize")`).
-   - `_reset_customization_defaults` explicitly updates all hex entry variables and resets theme presets.
-5. Unit tests: 11/11 passing.
+2. DnD Logic Flow Overhaul (`f13b4c5`):
+   - Scope is NO LONGER prematurely switched to "folder" before user confirms the action prompt.
+   - If user chooses **Cancel**: Complete abort — scope and search folders are untouched, preserving whatever prior state the user had (`Project`, `Folder`, or `Current File(s)`).
+   - If user chooses **Yes (Open all files)**: Opens files into editor tabs and intelligently sets search scope to `Current File(s)`.
+   - If user chooses **No (Set search scope)**: Only now sets `selected_search_folder` and switches scope to `Folder`.
+3. UI Naming & Search Capability:
+   - Scope radio button updated from "Current File" to **"Current File(s)"**.
+   - Searching under `Current File(s)` now searches across all currently opened documents/tabs (`self.open_documents.keys()`).
+4. Unit tests: 11/11 passing.
 
-**Next action:** Await user live verification of Scope radio buttons and Customize drawer, then proceed to Bug #15 (Plain `.txt` save verification) or next priority tasks.
+**Next action:** Await user verification of the overhauled DnD flow and `Current File(s)` search, then proceed to Bug #15 (Plain `.txt` save verification) or next priority tasks.
 
 ---
 
