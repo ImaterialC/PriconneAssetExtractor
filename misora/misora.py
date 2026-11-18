@@ -651,33 +651,19 @@ class NguiColorPickerPopup(tk.Toplevel):
         self._sync_ui_from_hsv()
 
     def _render_hue_bar(self) -> None:
+        # Use tk.PhotoImage.put() for the hue bar unconditionally.
+        # Reason: canvas_hue is only 20px wide; at 125%+ Windows DPI scaling
+        # ImageTk.PhotoImage on a narrow canvas may not render (blank/white).
+        # At 20×140 = 2800 pixels the put() string is tiny and always works.
         w, h = self.HUE_W, self.HUE_H
-        if Image is not None and ImageTk is not None:
-            raw = bytearray(w * h * 3)
-            h_denom = max(1, h - 1)
-            idx = 0
-            for y in range(h):
-                hue = y / h_denom
-                r, g, b = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
-                rb = int(r * 255)
-                gb = int(g * 255)
-                bb = int(b * 255)
-                for _ in range(w):
-                    raw[idx] = rb
-                    raw[idx + 1] = gb
-                    raw[idx + 2] = bb
-                    idx += 3
-            im = Image.frombytes("RGB", (w, h), bytes(raw))
-            img = ImageTk.PhotoImage(im, master=self)
-        else:
-            img = tk.PhotoImage(master=self, width=w, height=h)
-            rows: List[str] = []
-            for y in range(h):
-                hue = y / max(1, h - 1)
-                r, g, b = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
-                hx = f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
-                rows.append("{" + " ".join([hx] * w) + "}")
-            img.put(" ".join(rows))
+        img = tk.PhotoImage(master=self, width=w, height=h)
+        rows: List[str] = []
+        for y in range(h):
+            hue = y / max(1, h - 1)
+            r, g, b = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
+            hx = f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
+            rows.append("{" + " ".join([hx] * w) + "}")
+        img.put(" ".join(rows))
         self._hue_photo = img
         self.canvas_hue.delete("all")
         self.canvas_hue.create_image(0, 0, anchor="nw", image=img)
