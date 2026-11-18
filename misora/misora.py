@@ -1996,23 +1996,25 @@ class MisoraApp(tk.Tk):
             # 2. Process dropped folder(s)
             if dirs:
                 folder = dirs[0].resolve()
-                self.selected_search_folder = folder
-                self.scope_var.set("folder")
-                self._sync_scope_widgets()
                 story_files = (
                     sorted(folder.glob("*.unity3d")) +
                     sorted(folder.glob("*.asset")) +
                     sorted(folder.glob("*.txt"))
                 )
                 if not story_files:
+                    self.selected_search_folder = folder
+                    self.scope_var.set("folder")
+                    self._sync_scope_widgets()
                     self.lbl_status.config(
-                        text=f"Folder set for search: {folder} (no .unity3d/.asset/.txt files found)"
+                        text=f"Search scope set to folder: '{folder.name}' (no .unity3d/.asset/.txt files found to open)"
                     )
                 elif len(story_files) == 1:
                     try:
                         self.open_file(story_files[0])
+                        self.scope_var.set("current")
+                        self._sync_scope_widgets()
                         self.lbl_status.config(
-                            text=f"Opened \"{story_files[0].name}\" from folder. Search scope set."
+                            text=f"Opened \"{story_files[0].name}\" from folder. Search scope set to Current File(s)."
                         )
                     except Exception as exc:  # noqa: BLE001
                         self.logger.error("Drag & Drop", f"Could not open {story_files[0].name}: {exc}")
@@ -2022,7 +2024,7 @@ class MisoraApp(tk.Tk):
                         f"Found {len(story_files)} story file(s) in folder '{folder.name}'.\n\n"
                         f"  Yes    – Open all {len(story_files)} files as editor tabs\n"
                         f"  No     – Set search scope to this folder only (open nothing)\n"
-                        f"  Cancel – Abort: do nothing, keep the current state",
+                        f"  Cancel – Abort: do nothing, keep current state",
                         default=messagebox.YES,
                     )
                     if ans is True:
@@ -2034,21 +2036,24 @@ class MisoraApp(tk.Tk):
                                     opened += 1
                                 except Exception as exc:  # noqa: BLE001
                                     self.logger.error("Drag & Drop", f"Could not open {sf.name}: {exc}")
+                            # When all files are opened into tabs, switch scope to Current File(s)
+                            self.scope_var.set("current")
+                            self._sync_scope_widgets()
                             self.lbl_status.config(
-                                text=f"Opened {opened} file(s) from folder. Search scope set to: {folder.name}"
+                                text=f"Opened {opened} file(s) into tabs. Search scope set to Current File(s)."
                             )
                         else:
-                            self.lbl_status.config(text=f"Folder set for search: {folder.name}")
+                            self.lbl_status.config(text="Folder drop cancelled by user.")
                     elif ans is False:
-                        # "No" = Set scope to folder only, open nothing
+                        # "No" = Set search scope to this folder only (open nothing)
+                        self.selected_search_folder = folder
+                        self.scope_var.set("folder")
+                        self._sync_scope_widgets()
                         self.lbl_status.config(
-                            text=f"Search scope set to folder: {folder.name} ({len(story_files)} story file(s) found). No files opened."
+                            text=f"Search scope set to folder: '{folder.name}' ({len(story_files)} story file(s) found). No files opened."
                         )
                     else:
-                        # "Cancel" = Abort, undo scope change
-                        self.selected_search_folder = None
-                        self.scope_var.set("project")
-                        self._sync_scope_widgets()
+                        # "Cancel" = Abort: do nothing, touch nothing!
                         self.lbl_status.config(text="Folder drop cancelled. No changes made.")
         except Exception as exc:
             self.logger.exception("Error while handling dropped path(s):", exc)
@@ -2794,7 +2799,7 @@ class MisoraApp(tk.Tk):
         )
         self.btn_browse_search_folder = ttk.Button(row2, text="...", style="Small.TButton", command=self.on_open_folder, width=2)
 
-        self.rb_cur = ttk.Radiobutton(row2, text="Current File", variable=self.scope_var, value="current", style="Panel.TRadiobutton", command=self._sync_scope_widgets)
+        self.rb_cur = ttk.Radiobutton(row2, text="Current File(s)", variable=self.scope_var, value="current", style="Panel.TRadiobutton", command=self._sync_scope_widgets)
         self.rb_cur.pack(side="left", padx=2)
 
         self._tag_role(tk.Label(row2, text="|", bg=t["bg_panel"], fg=t["border"]), "label_sep").pack(side="left", padx=8)
@@ -5830,7 +5835,9 @@ class MisoraApp(tk.Tk):
         target_paths: List[Path] = []
 
         if scope == "current":
-            if self.current_file_path:
+            if getattr(self, "open_documents", None):
+                target_paths = list(self.open_documents.keys())
+            elif self.current_file_path:
                 target_paths = [self.current_file_path]
             else:
                 messagebox.showinfo("Search", "No file is currently open.")
