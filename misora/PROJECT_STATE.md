@@ -4,17 +4,14 @@
 ---
 
 ## SESSION HANDOFF / RESUME INSTRUCTIONS
-**Current step:** Bug #12 (NGUI Color & Gradient Picker) verified and hardened:
-- SV map & Gradient preview rendered with Pillow `ImageTk.PhotoImage`
-- Hue bar rendered with Tk native `tk.PhotoImage.put()` (bypasses 125%+ DPI narrow canvas clipping)
-- Window geometry set to explicit `400x320` minimum (ensures swatches, hex entry, and insert buttons are never truncated)
-- Canvas images retain explicit C-level references (`canvas.image = img`)
-- Detailed logging added on popup creation
+**Current step:** Bug #12 (Color Picker) updated:
+- Restored Pillow `Image.frombytes` for Hue Bar rendering (eliminates Tk `put()` string parsing exceptions on Windows Tcl/Tk)
+- Added explicit popup title `NGUI Color & Gradient Picker (v1.3.3)` to visually confirm new code is active
+- Added crash dialog (`messagebox.showerror`) and file logging (`picker_error.log`) inside `NguiColorPickerPopup.__init__` to catch and expose any initialization error
+- Minimum geometry expanded to 420x340
 - Unit tests: 11/11 passing
-- **IMPORTANT NOTE FOR USER:** The app must be fully closed (close existing Misora window) before launching `misora.bat` so Python loads the new files from disk.
 
-**Next action:** Apply DnD improvements (Bug #1: folder multi-file confirmation prompt, large-file safety warning, binary non-text file filter).  
-Awaiting user confirmation to apply DnD improvements.
+**Next action:** Await user verification of the color picker window in v1.3.3.
 
 ---
 
