@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 from datetime import datetime
 from pathlib import Path
@@ -541,7 +542,7 @@ class NguiColorPickerPopup(tk.Toplevel):
 
         self.btn_eyedropper = tk.Button(
             side_col,
-            text="🧪 Eyedropper",
+            text="💧 Eyedropper",
             font=("Segoe UI", 8, "bold"),
             bg=t["bg_editor"],
             fg=editor_fg,
@@ -797,13 +798,21 @@ class NguiColorPickerPopup(tk.Toplevel):
             user32 = ctypes.windll.user32
             gdi32 = ctypes.windll.gdi32
 
+            # Strict 64-bit safe signatures
+            user32.GetDC.restype = wintypes.HDC
+            user32.GetDC.argtypes = [wintypes.HWND]
+            user32.ReleaseDC.restype = ctypes.c_int
+            user32.ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
+            gdi32.GetPixel.restype = wintypes.COLORREF
+            gdi32.GetPixel.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int]
+
             pt = wintypes.POINT()
             user32.GetCursorPos(ctypes.byref(pt))
-            hdc = gdi32.GetDC(0)
+            hdc = user32.GetDC(0)
             try:
                 colorref = gdi32.GetPixel(hdc, pt.x, pt.y)
             finally:
-                gdi32.ReleaseDC(0, hdc)
+                user32.ReleaseDC(0, hdc)
 
             if colorref != -1 and colorref != 0xFFFFFFFF:
                 r = colorref & 0xFF
@@ -841,7 +850,7 @@ class NguiColorPickerPopup(tk.Toplevel):
             self._eyedropper_after_id = None
         if self.winfo_exists():
             self.btn_eyedropper.configure(
-                text="🧪 Eyedropper",
+                text="💧 Eyedropper",
                 bg=self.theme["bg_editor"],
                 fg=best_contrast_fg(self.theme["bg_editor"], self.theme["fg_text"], "#ffffff"),
             )
@@ -1028,6 +1037,20 @@ class MisoraApp(tk.Tk):
 
         if initial_path and os.path.exists(initial_path):
             self.open_file(initial_path)
+        elif hasattr(self, "_saved_opened_files") and self._saved_opened_files:
+            def _restore_session():
+                for fp in self._saved_opened_files:
+                    try:
+                        if fp.exists():
+                            self.open_file(fp)
+                    except Exception:
+                        pass
+                if hasattr(self, "_saved_active_file") and self._saved_active_file and self._saved_active_file.exists():
+                    try:
+                        self.open_file(self._saved_active_file)
+                    except Exception:
+                        pass
+            self.after(100, _restore_session)
 
     # -------------------------------------------------------------------------
     # Global Exception Hooks & Exit Lifecycle
@@ -1120,6 +1143,17 @@ class MisoraApp(tk.Tk):
                 self.datamine_exe = _load_path("datamine_exe")
                 self.external_editor_path = _load_path("external_editor_path")
                 self.notepadpp_path = _load_path("notepadpp_path")
+                self.last_opened_dir = _load_path("last_opened_dir")
+                self.selected_search_folder = _load_path("selected_search_folder")
+                if isinstance(raw.get("saved_opened_files"), list):
+                    self._saved_opened_files = [Path(p) for p in raw["saved_opened_files"] if isinstance(p, str) and p and Path(p).exists()]
+                else:
+                    self._saved_opened_files = []
+                self._saved_active_file = _load_path("saved_active_file")
+                if isinstance(raw.get("recent_files"), list):
+                    self.recent_files = [Path(p) for p in raw["recent_files"] if isinstance(p, str) and p and Path(p).exists()]
+                else:
+                    self.recent_files = []
                 if isinstance(raw.get("left_dock_tab"), str):
                     self._left_dock_tab = raw["left_dock_tab"]
                 if isinstance(raw.get("left_dock_width"), int):
@@ -1161,6 +1195,11 @@ class MisoraApp(tk.Tk):
                 "datamine_exe": str(self.datamine_exe) if self.datamine_exe else "",
                 "external_editor_path": str(self.external_editor_path) if self.external_editor_path else "",
                 "notepadpp_path": str(self.notepadpp_path) if self.notepadpp_path else "",
+                "last_opened_dir": str(self.last_opened_dir) if getattr(self, "last_opened_dir", None) else "",
+                "selected_search_folder": str(self.selected_search_folder) if getattr(self, "selected_search_folder", None) else "",
+                "saved_opened_files": [str(p) for p in getattr(self, "open_documents", {}).keys() if p.exists()],
+                "saved_active_file": str(self.current_file_path) if getattr(self, "current_file_path", None) and self.current_file_path.exists() else "",
+                "recent_files": [str(p) for p in getattr(self, "recent_files", [])[:15] if isinstance(p, Path) and p.exists()],
                 "left_dock_tab": self._left_dock_tab if hasattr(self, "_left_dock_tab") else "search",
                 "left_dock_width": self._left_dock_width if hasattr(self, "_left_dock_width") else 340,
                 "datamine_confirm_skip": self._datamine_confirm_skip if hasattr(self, "_datamine_confirm_skip") else False,
@@ -1384,7 +1423,7 @@ class MisoraApp(tk.Tk):
             selectbackground=t["highlight_bg"],
             selectforeground=hl_fg,
         )
-        self.txt_continuous.tag_configure("cont_divider", foreground=t["border"], font=("Consolas", max(7, d_sz - 3)))
+        self.txt_continuous.tag_configure("cont_divider", foreground=t["misora_pink"], font=("Consolas", max(8, d_sz - 1), "bold"), spacing1=4, spacing3=2)
         self.txt_continuous.tag_configure("cont_badge", foreground=t["misora_pink"], font=("Consolas", max(8, d_sz - 2), "bold"))
         self.txt_continuous.tag_configure("cont_speaker", foreground=editor_fg, font=(d_fam, max(9, d_sz - 1), "bold"))
         self.txt_continuous.tag_configure("cont_narrator", foreground=t["fg_muted"], font=(d_fam, max(8, d_sz - 2), "italic"))
@@ -1942,6 +1981,11 @@ class MisoraApp(tk.Tk):
         file_menu = tk.Menu(menubar, tearoff=0, bg=t["bg_panel"], fg=panel_fg, activebackground=t["misora_pink"], activeforeground=accent_fg)
         file_menu.add_command(label="Open File...", command=self.on_open_file, accelerator="Ctrl+O")
         file_menu.add_command(label="Open Folder...", command=self.on_open_folder, accelerator="Ctrl+Shift+O")
+
+        self.recent_menu = tk.Menu(file_menu, tearoff=0, bg=t["bg_panel"], fg=panel_fg, activebackground=t["misora_pink"], activeforeground=accent_fg, postcommand=self._sync_recent_files_menu)
+        file_menu.add_cascade(label="Recent Files", menu=self.recent_menu)
+        self._all_menus.append(self.recent_menu)
+
         file_menu.add_separator()
         file_menu.add_command(label="Save & Patch Bundle", command=self.on_save, accelerator="Ctrl+S")
         file_menu.add_command(label="Reload Current File", command=self.on_reload, accelerator="F5")
@@ -2930,6 +2974,8 @@ class MisoraApp(tk.Tk):
         self._configure_editor_rich_tags(self.txt_dialogue, d_fam, d_sz)
         self.txt_dialogue.bind("<KeyRelease>", lambda e: self._on_dialogue_edited())
         self.txt_dialogue.bind("<MouseWheel>", self._on_gd_mousewheel)
+        self.txt_dialogue.bind("<Up>", self._on_dialogue_key_up)
+        self.txt_dialogue.bind("<Down>", self._on_dialogue_key_down)
         self.txt_dialogue.bind("<Control-b>", lambda e: self._shortcut_wrap("[b]", "[/b]"))
         self.txt_dialogue.bind("<Control-i>", lambda e: self._shortcut_wrap("[i]", "[/i]"))
         self.txt_dialogue.bind("<Control-u>", lambda e: self._shortcut_wrap("[u]", "[/u]"))
@@ -3145,18 +3191,56 @@ class MisoraApp(tk.Tk):
     # Speaker Attributes & Actor Quick Assignment
     # -------------------------------------------------------------------------
     def _on_speaker_dropdown_clicked(self) -> None:
-        """Display a popup menu of actors in the current story for quick speaker assignment."""
-        if not self.current_doc or not self.current_doc.boxes:
-            return
-        actors = self.current_doc.actors()
-        if not actors:
-            return
-        menu = tk.Menu(self, tearoff=0)
-        for act in actors:
-            menu.add_command(
-                label=act,
-                command=lambda a=act: self._assign_speaker_to_current_box(a),
+        """Display a rich popup menu of story actors, Priconne attributes/variants, and tools (#18)."""
+        t = self.theme
+        panel_fg = best_contrast_fg(t["bg_panel"], t["fg_text"], "#ffffff")
+        menu = tk.Menu(self, tearoff=0, bg=t["bg_panel"], fg=panel_fg, activebackground=t["misora_pink"], activeforeground=best_contrast_fg(t["misora_pink"]))
+
+        # 1. Known Story Actors
+        if self.current_doc:
+            actors = [a for a in sorted(self.current_doc.actors()) if a]
+            if actors:
+                act_menu = tk.Menu(menu, tearoff=0, bg=t["bg_panel"], fg=panel_fg, activebackground=t["misora_pink"], activeforeground=best_contrast_fg(t["misora_pink"]))
+                for act in actors:
+                    act_menu.add_command(
+                        label=act,
+                        command=lambda a=act: self._assign_speaker_to_current_box(a),
+                    )
+                menu.add_cascade(label="Known Story Actors", menu=act_menu)
+
+        # 2. Priconne Character Attributes / Costumes / Variants
+        attr_menu = tk.Menu(menu, tearoff=0, bg=t["bg_panel"], fg=panel_fg, activebackground=t["misora_pink"], activeforeground=best_contrast_fg(t["misora_pink"]))
+        common_attrs = [
+            ("（サマー）", "Summer"),
+            ("（プリンセス）", "Princess"),
+            ("（ニューイヤー）", "New Year"),
+            ("（ハロウィン）", "Halloween"),
+            ("（クリスマス）", "Christmas"),
+            ("（バレンタイン）", "Valentine"),
+            ("（オーエド）", "Oedo"),
+            ("（マジカル）", "Magical"),
+            ("（儀装束）", "Ceremonial"),
+            ("（怪盗）", "Phantom Thief"),
+            ("（ワイルド）", "Wild"),
+            ("（エクス）", "X"),
+            ("（アストラル）", "Astral"),
+            ("（コマンダー）", "Commander"),
+            ("（レンジャー）", "Ranger"),
+            ("（カフェ）", "Cafe"),
+        ]
+        for jp_suf, en_name in common_attrs:
+            attr_menu.add_command(
+                label=f"{jp_suf}  [{en_name}]",
+                command=lambda s=jp_suf: self._append_speaker_attribute(s),
             )
+        attr_menu.add_separator()
+        attr_menu.add_command(label="Append Custom Attribute...", command=self._prompt_append_speaker_attribute)
+        menu.add_cascade(label="Speaker Attributes / Variants", menu=attr_menu)
+
+        menu.add_separator()
+        menu.add_command(label="Insert {playername}", command=lambda: self._assign_speaker_to_current_box("{playername}"))
+        menu.add_command(label="Clear Speaker (Narration)", command=lambda: self._assign_speaker_to_current_box(""))
+
         try:
             x = self.btn_speaker_dropdown.winfo_rootx()
             y = self.btn_speaker_dropdown.winfo_rooty() + self.btn_speaker_dropdown.winfo_height()
@@ -3167,7 +3251,46 @@ class MisoraApp(tk.Tk):
     def _assign_speaker_to_current_box(self, new_speaker: str) -> None:
         self.speaker_var.set(new_speaker)
         self._on_speaker_edited()
-        self.show_toast(f"Assigned speaker: {new_speaker}")
+        self.show_toast(f"Assigned speaker: {new_speaker or '(Narration)'}")
+
+    def _append_speaker_attribute(self, attr_suffix: str) -> None:
+        cur = self.speaker_var.get().strip()
+        new_val = f"{cur}{attr_suffix}" if cur else attr_suffix
+        self.speaker_var.set(new_val)
+        self._on_speaker_edited()
+        self.show_toast(f"Updated speaker: {new_val}")
+
+    def _prompt_append_speaker_attribute(self) -> None:
+        """Modal prompt to append a custom attribute/variant to current speaker."""
+        t = self.theme
+        dlg = tk.Toplevel(self)
+        dlg.title("Append Speaker Attribute")
+        dlg.geometry("380x150")
+        dlg.resizable(False, False)
+        dlg.transient(self)
+        dlg.grab_set()
+        dlg.configure(bg=t["bg_panel"])
+        apply_window_icon(dlg)
+
+        tk.Label(dlg, text="Enter Attribute (e.g. （サマー） or (Summer)):", font=("Segoe UI", 9, "bold"), bg=t["bg_panel"], fg=best_contrast_fg(t["bg_panel"])).pack(padx=14, pady=(14, 6), anchor="w")
+        var_attr = tk.StringVar(value="（サマー）")
+        ent = tk.Entry(dlg, textvariable=var_attr, font=("Segoe UI", 10), bg=t["bg_editor"], fg=best_contrast_fg(t["bg_editor"]))
+        ent.pack(fill="x", padx=14, pady=4)
+        ent.focus_set()
+        ent.select_range(0, tk.END)
+
+        btn_row = tk.Frame(dlg, bg=t["bg_panel"])
+        btn_row.pack(fill="x", padx=14, pady=10)
+
+        def _commit():
+            val = var_attr.get().strip()
+            if val:
+                self._append_speaker_attribute(val)
+            dlg.destroy()
+
+        ent.bind("<Return>", lambda e: _commit())
+        ttk.Button(btn_row, text="Append", style="Pink.TButton", command=_commit).pack(side="right", padx=(4, 0))
+        ttk.Button(btn_row, text="Cancel", style="TButton", command=dlg.destroy).pack(side="right")
 
     # -------------------------------------------------------------------------
     # Line Numbers Gutter & Column Ruler Synchronization (#12)
@@ -4186,6 +4309,10 @@ class MisoraApp(tk.Tk):
             self.gd_scroll_wrap.pack_forget()
             self.continuous_wrap.pack(fill="both", expand=True, padx=8, pady=(0, 6))
             self.lbl_gd_title.config(text="GAME VIEW (Continuous Stream)")
+            self._render_continuous_view()
+            # Perfectly focus active box when switching to continuous view (#11)
+            if self.current_doc and self.current_doc.boxes:
+                self._focus_continuous_box(self.current_box_idx, move_cursor=True)
         else:
             # Sync active box from cursor position in continuous view (#11)
             cur_box = self._find_continuous_box_at_index("insert")
@@ -4196,8 +4323,7 @@ class MisoraApp(tk.Tk):
             self.continuous_wrap.pack_forget()
             self.gd_scroll_wrap.pack(fill="both", expand=True, padx=4, pady=(0, 4))
             self.lbl_gd_title.config(text="GAME VIEW (Clean Dialogue)")
-
-        self._update_views()
+            self._update_views()
 
     # -------------------------------------------------------------------------
     # Status & Action Bar
@@ -4237,6 +4363,10 @@ class MisoraApp(tk.Tk):
         self.btn_save = ttk.Button(action_bar, text="Save & Patch Bundle (Ctrl+S)", style="Pink.TButton", command=self.on_save)
         self.btn_save.pack(side="right", padx=4)
 
+    def _toggle_console_shortcut(self) -> None:
+        """Inform user that diagnostic logs stream live to the standard Windows console."""
+        self.show_toast("Logs stream to the persistent Windows console.")
+
     def _bind_shortcuts(self) -> None:
         self.bind("<Control-o>", lambda e: self.on_open_file())
         self.bind("<Control-O>", lambda e: self.on_open_folder())
@@ -4259,6 +4389,8 @@ class MisoraApp(tk.Tk):
         self.bind("<F12>", lambda e: self._toggle_console_shortcut())
         self.bind("<Alt-Left>", lambda e: self.on_prev_box())
         self.bind("<Alt-Right>", lambda e: self.on_next_box())
+        self.bind("<Alt-Up>", lambda e: self.on_prev_box())
+        self.bind("<Alt-Down>", lambda e: self.on_next_box())
         self.bind("<Control-t>", lambda e: self.on_open_translator_assistant())
         self.bind("<Control-T>", lambda e: self.on_copy_ai_prompt())
         self.bind("<Control-Shift-T>", lambda e: self.on_copy_ai_prompt())
@@ -4279,6 +4411,13 @@ class MisoraApp(tk.Tk):
             self.logger.error("File I/O", f"Cannot find file: {file_path}")
             messagebox.showerror("File Error", f"Cannot find file: {file_path}")
             return
+        self.last_opened_dir = file_path.parent
+        if not hasattr(self, "recent_files"):
+            self.recent_files = []
+        if file_path in self.recent_files:
+            self.recent_files.remove(file_path)
+        self.recent_files.insert(0, file_path)
+        self.recent_files = self.recent_files[:15]
 
         # Check in-memory opened files cache if not explicitly reloading from disk
         if not reload_from_disk and file_path in self.open_documents:
@@ -4619,13 +4758,21 @@ class MisoraApp(tk.Tk):
         """Find the closest box index for a click/cursor landing on a divider or header line."""
         if not self.current_doc or not self.current_doc.boxes:
             return 0
-        marks = set(self.txt_continuous.mark_names())
         total = len(self.current_doc.boxes)
-        for i in range(total):
-            e_mark = f"box_end_{i}"
-            if e_mark in marks:
-                if self.txt_continuous.compare(tk_index, "<=", e_mark):
-                    return i
+        # Check header spans first - if clicked on header of box i, return i
+        for i, (h_s, h_e) in self._cont_header_spans.items():
+            if self.txt_continuous.compare(tk_index, ">=", h_s) and self.txt_continuous.compare(tk_index, "<=", h_e):
+                return i
+        # If before first box body
+        if total > 0 and "box_start_0" in self.txt_continuous.mark_names():
+            if self.txt_continuous.compare(tk_index, "<", "box_start_0"):
+                return 0
+        # If in a divider between box i-1 and box i, map to preceding box so Up movement escapes
+        for i in range(1, total):
+            s_mark = f"box_start_{i}"
+            if s_mark in self.txt_continuous.mark_names():
+                if self.txt_continuous.compare(tk_index, "<", s_mark):
+                    return i - 1
         return max(0, total - 1)
 
     def _on_continuous_cursor_moved(self, event: Optional[tk.Event] = None) -> None:
@@ -4636,7 +4783,8 @@ class MisoraApp(tk.Tk):
         box_idx = self._find_continuous_box_at_index(click_idx)
         if box_idx is None:
             box_idx = self._nearest_continuous_box_to_index(click_idx)
-            if not self.var_preview_compiled.get():
+            # Only snap cursor to start_mark on explicit mouse click, NOT keyboard navigation
+            if event is not None and not self.var_preview_compiled.get():
                 start_mark = f"box_start_{box_idx}"
                 if start_mark in self.txt_continuous.mark_names():
                     self.txt_continuous.mark_set("insert", start_mark)
@@ -4664,25 +4812,29 @@ class MisoraApp(tk.Tk):
         # Up / Down smooth box navigation (#14)
         if keysym == "Up":
             box_idx = self._find_continuous_box_at_index("insert")
+            if box_idx is None:
+                box_idx = self._nearest_continuous_box_to_index("insert")
             if box_idx is not None and box_idx > 0:
                 s_mark = f"box_start_{box_idx}"
-                if self.txt_continuous.compare("insert linestart", "==", f"{s_mark} linestart"):
+                if self.txt_continuous.compare("insert linestart", "<=", f"{s_mark} linestart"):
                     prev_end = f"box_end_{box_idx - 1}"
                     if prev_end in self.txt_continuous.mark_names():
                         self.txt_continuous.mark_set("insert", prev_end)
                         self.txt_continuous.see(prev_end)
-                        self.after_idle(self._on_continuous_cursor_moved)
+                        self._focus_continuous_box(box_idx - 1, move_cursor=False)
                         return "break"
         elif keysym == "Down":
             box_idx = self._find_continuous_box_at_index("insert")
+            if box_idx is None:
+                box_idx = self._nearest_continuous_box_to_index("insert")
             if box_idx is not None and box_idx < len(self.current_doc.boxes) - 1:
                 e_mark = f"box_end_{box_idx}"
-                if self.txt_continuous.compare("insert lineend", "==", f"{e_mark} lineend"):
+                if self.txt_continuous.compare("insert lineend", ">=", f"{e_mark} lineend"):
                     next_start = f"box_start_{box_idx + 1}"
                     if next_start in self.txt_continuous.mark_names():
                         self.txt_continuous.mark_set("insert", next_start)
                         self.txt_continuous.see(next_start)
-                        self.after_idle(self._on_continuous_cursor_moved)
+                        self._focus_continuous_box(box_idx + 1, move_cursor=False)
                         return "break"
 
         if keysym in nav_keys:
@@ -5081,6 +5233,26 @@ class MisoraApp(tk.Tk):
             if was_disabled:
                 self.txt_continuous.config(state="disabled")
             self._suppress_continuous_events = False
+
+    def _on_dialogue_key_up(self, _event: tk.Event) -> Optional[str]:
+        """Navigate to previous box when pressing Up at top line of Clean Dialogue View."""
+        if self.txt_dialogue.compare("insert linestart", "==", "1.0"):
+            if self.current_box_idx > 0:
+                self.on_prev_box()
+                self.txt_dialogue.mark_set("insert", "end-1c")
+                self.txt_dialogue.see("insert")
+                return "break"
+        return None
+
+    def _on_dialogue_key_down(self, _event: tk.Event) -> Optional[str]:
+        """Navigate to next box when pressing Down at bottom line of Clean Dialogue View."""
+        if self.txt_dialogue.compare("insert lineend", ">=", "end-1c"):
+            if self.current_doc and self.current_box_idx < len(self.current_doc.boxes) - 1:
+                self.on_next_box()
+                self.txt_dialogue.mark_set("insert", "1.0")
+                self.txt_dialogue.see("insert")
+                return "break"
+        return None
 
     def _on_dialogue_edited(self) -> None:
         """Triggered on every keystroke in the single-box Game Display dialogue editor."""
@@ -5583,8 +5755,36 @@ class MisoraApp(tk.Tk):
     # -------------------------------------------------------------------------
     # Dialogs & Helpers
     # -------------------------------------------------------------------------
+    def _sync_recent_files_menu(self) -> None:
+        """Dynamically populate Recent Files submenu."""
+        if not hasattr(self, "recent_menu"):
+            return
+        self.recent_menu.delete(0, tk.END)
+        recents = getattr(self, "recent_files", [])
+        valid_recents = [p for p in recents if isinstance(p, Path) and p.exists()]
+        if not valid_recents:
+            self.recent_menu.add_command(label="(No recent files)", state="disabled")
+            return
+        for fp in valid_recents[:12]:
+            self.recent_menu.add_command(
+                label=f"{fp.name}  ({fp.parent})",
+                command=lambda p=fp: self.open_file(p),
+            )
+        self.recent_menu.add_separator()
+        self.recent_menu.add_command(
+            label="Clear Recent Files",
+            command=self._clear_recent_files,
+        )
+
+    def _clear_recent_files(self) -> None:
+        self.recent_files = []
+        self._save_user_prefs(silent=True)
+        self.show_toast("Cleared recent files history")
+
     def on_open_file(self) -> None:
+        init_dir = str(self.last_opened_dir) if getattr(self, "last_opened_dir", None) and self.last_opened_dir.exists() else None
         f = filedialog.askopenfilename(
+            initialdir=init_dir,
             title="Open Story Asset or Script",
             filetypes=[
                 ("Priconne Assets & Scripts", "*.unity3d;*.asset;*.txt;*.json"),
@@ -5594,15 +5794,22 @@ class MisoraApp(tk.Tk):
             ]
         )
         if f:
+            self.last_opened_dir = Path(f).parent
             self.open_file(f)
+            self._save_user_prefs(silent=True)
 
     def on_open_folder(self) -> None:
-        f = filedialog.askdirectory(title="Open Project or Asset Folder")
+        init_dir = str(self.selected_search_folder) if getattr(self, "selected_search_folder", None) and self.selected_search_folder.exists() else (
+            str(self.last_opened_dir) if getattr(self, "last_opened_dir", None) and self.last_opened_dir.exists() else None
+        )
+        f = filedialog.askdirectory(initialdir=init_dir, title="Open Project or Asset Folder")
         if f:
             self.selected_search_folder = Path(f)
+            self.last_opened_dir = Path(f)
             self.folder_path_var.set(str(f))
             self.scope_var.set("folder")
             self._sync_scope_widgets()
+            self._save_user_prefs(silent=True)
             self.lbl_status.config(text=f"Selected folder for search: {f}")
 
     def _sync_scope_widgets(self) -> None:
@@ -6958,7 +7165,7 @@ class MTLSettingsDialog(tk.Toplevel):
             def update():
                 if self.winfo_exists():
                     self.btn_tst.config(state="normal")
-                    col = self.app.theme["accent_green"] if ok else self.app.theme["accent_yellow"]
+                    col = self.app.theme.get("accent_green", "#2e7d32") if ok else self.app.theme.get("accent_yellow", "#f57c00")
                     self.lbl_tst_result.config(text=msg, fg=col)
             self.after_idle(update)
 
@@ -7136,6 +7343,17 @@ class TranslatorAssistantDialog(tk.Toplevel):
         )
         self.lbl_speaker.pack(side="left", padx=(10, 0))
 
+        # Pin on Top & Engine selector on right (#6)
+        self._is_pinned_top = False
+        self.btn_pin = ttk.Button(
+            top_bar,
+            text="📌",
+            style="Small.TButton",
+            width=3,
+            command=self._toggle_pin_top,
+        )
+        self.btn_pin.pack(side="right", padx=(4, 0))
+
         # Engine selector on right
         self.var_engine = tk.StringVar(value=self.app.mtl_config.active_engine)
         cb = ttk.Combobox(top_bar, textvariable=self.var_engine, values=MTL_ENGINES, state="readonly", width=14)
@@ -7209,6 +7427,19 @@ class TranslatorAssistantDialog(tk.Toplevel):
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.refresh_box()
+
+    def _toggle_pin_top(self):
+        self._is_pinned_top = not getattr(self, "_is_pinned_top", False)
+        self.wm_attributes("-topmost", self._is_pinned_top)
+        self.btn_pin.configure(text="📌" if self._is_pinned_top else "📍")
+        self.app.show_toast(f"Translator Assistant {'pinned on top' if self._is_pinned_top else 'unpinned'}")
+
+    def _toggle_pin_top(self):
+        self._is_pinned_top = not getattr(self, "_is_pinned_top", False)
+        self.wm_attributes("-topmost", self._is_pinned_top)
+        self.btn_pin.configure(text="📌" if self._is_pinned_top else "📍")
+        status = "pinned on top" if self._is_pinned_top else "unpinned"
+        self.app.show_toast(f"Translator Assistant {status}")
 
     def _on_close(self):
         self.app._translator_dialog = None
@@ -7457,6 +7688,12 @@ class BatchTranslateDialog(tk.Toplevel):
         self.btn_start = ttk.Button(btn_bar, text="Start Batch", style="Pink.TButton", command=self._start_batch)
         self.btn_start.pack(side="right", padx=4)
 
+    def _toggle_pin_top(self):
+        self._is_pinned_top = not getattr(self, "_is_pinned_top", False)
+        self.wm_attributes("-topmost", self._is_pinned_top)
+        self.btn_pin.configure(text="📌" if self._is_pinned_top else "📍")
+        self.app.show_toast(f"Translator Assistant {'pinned on top' if self._is_pinned_top else 'unpinned'}")
+
     def _on_close(self):
         if self._is_running:
             self._cancelled = True
@@ -7533,7 +7770,6 @@ class BatchTranslateDialog(tk.Toplevel):
                     self.app.logger.warning("MTL", f"Batch translate failed on box {b_idx}: {exc}")
 
                 if delay > 0 and step < len(targets) - 1:
-                    import time
                     time.sleep(delay)
 
             self.app.undo_journal.end_batch()

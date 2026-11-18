@@ -222,5 +222,29 @@ class TestMisoraCore(unittest.TestCase):
         self.assertEqual(matches[2].group(3).strip(), "今日も良い天気ですね。")
 
 
+    def test_11_session_preferences_and_paths(self):
+        """Verify session paths and recent files schema serialization."""
+        import json
+        config_data = {
+            "config_version": 4,
+            "last_opened_dir": str(self.tmp_dir),
+            "selected_search_folder": str(self.tmp_dir / "stories"),
+            "saved_opened_files": [
+                str(self.tmp_dir / "story_101.unity3d"),
+                str(self.tmp_dir / "story_102.unity3d"),
+            ],
+            "saved_active_file": str(self.tmp_dir / "story_101.unity3d"),
+            "recent_files": [
+                str(self.tmp_dir / "story_101.unity3d"),
+            ],
+        }
+        encoded = json.dumps(config_data)
+        decoded = json.loads(encoded)
+        self.assertEqual(decoded["config_version"], 4)
+        self.assertEqual(decoded["last_opened_dir"], str(self.tmp_dir))
+        self.assertEqual(len(decoded["saved_opened_files"]), 2)
+        self.assertEqual(decoded["saved_active_file"], str(self.tmp_dir / "story_101.unity3d"))
+
+
 if __name__ == "__main__":
     unittest.main()

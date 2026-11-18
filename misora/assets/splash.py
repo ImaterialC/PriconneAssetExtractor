@@ -21,8 +21,14 @@ import tkinter as tk
 from pathlib import Path
 from typing import Optional
 
+try:
+    from PIL import Image, ImageTk
+    _HAS_PIL = True
+except ImportError:
+    _HAS_PIL = False
 
-SPLASH_IMAGES = ["Splash_A.png", "Splash_B.png", "Splash_C.png"]
+
+SPLASH_IMAGES = ["Splash_1.jpg", "Splash_2.jpg", "Splash_3.jpg", "Splash_1.png", "Splash_2.png", "Splash_3.png", "Splash_A.png", "Splash_B.png", "Splash_C.png"]
 SPLASH_DIR = Path(__file__).resolve().parent
 
 # Splash window size
@@ -120,24 +126,40 @@ class MisoraSplashScreen:
         self._animate()
 
     def _load_artwork(self):
-        """Try to load a random splash artwork PNG into a PhotoImage."""
+        """Try to load a random splash artwork image into a PhotoImage with high-quality scaling."""
         candidates = random.sample(SPLASH_IMAGES, len(SPLASH_IMAGES))
         for name in candidates:
             img_path = SPLASH_DIR / name
-            if img_path.exists():
+            if not img_path.exists():
+                continue
+            if _HAS_PIL:
                 try:
-                    raw = tk.PhotoImage(file=str(img_path))
-                    # Scale to fit within canvas (keep aspect ratio)
+                    pil_img = Image.open(img_path)
+                    # Resize to fit/fill SPLASH_W x SPLASH_H with aspect-preserving crop or fit
+                    iw, ih = pil_img.size
+                    scale = max(SPLASH_W / iw, SPLASH_H / ih)
+                    nw, nh = int(iw * scale), int(ih * scale)
+                    resample = getattr(Image, "Resampling", Image).LANCZOS
+                    resized = pil_img.resize((nw, nh), resample=resample)
+                    # Center crop to exact splash dimensions
+                    left = (nw - SPLASH_W) // 2
+                    top = (nh - SPLASH_H) // 2
+                    cropped = resized.crop((left, top, left + SPLASH_W, top + SPLASH_H))
+                    self._photo = ImageTk.PhotoImage(cropped, master=self._root)
+                    self._photo_raw = self._photo
+                    return
+                except Exception:
+                    pass
+            # Fallback to stdlib tk.PhotoImage (PNG/GIF/PPM only)
+            if img_path.suffix.lower() in (".png", ".gif", ".ppm"):
+                try:
+                    raw = tk.PhotoImage(file=str(img_path), master=self._root)
                     rw, rh = raw.width(), raw.height()
-                    # We want the image to fill SPLASH_W x SPLASH_H fully
                     scale_x = max(1, rw // SPLASH_W)
                     scale_y = max(1, rh // SPLASH_H)
                     scale = max(scale_x, scale_y)
-                    if scale > 1:
-                        self._photo = raw.subsample(scale, scale)
-                    else:
-                        self._photo = raw
-                    self._photo_raw = raw   # prevent GC
+                    self._photo = raw.subsample(scale, scale) if scale > 1 else raw
+                    self._photo_raw = raw
                     return
                 except Exception:
                     pass
@@ -187,7 +209,7 @@ class MisoraSplashScreen:
             anchor="sw",
             text="MISORA",
             font=("Segoe UI", 38, "bold"),
-            fill="#00000088",
+            fill="#0a0314",
             tags="logo_shadow",
         )
         # Foreground with purple-to-white gradient simulation (two layers)
