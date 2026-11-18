@@ -25,6 +25,13 @@ from pathlib import Path
 from tkinter import colorchooser, filedialog, messagebox, ttk
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
+try:
+    from PIL import Image, ImageGrab, ImageTk
+except ImportError:
+    Image = None  # type: ignore
+    ImageTk = None  # type: ignore
+    ImageGrab = None  # type: ignore
+
 if sys.platform == "win32":
     import winreg
     from ctypes import wintypes
@@ -383,7 +390,6 @@ class NguiColorPickerPopup(tk.Toplevel):
         self.theme = parent.theme
         self.title("NGUI Color & Gradient Picker")
         self.configure(bg=self.theme["bg_panel"])
-        self.resizable(False, False)
         self.transient(parent)
 
         self.stop_colors: List[str] = [
@@ -400,9 +406,9 @@ class NguiColorPickerPopup(tk.Toplevel):
         b = int(self.stop_colors[0][5:7], 16) / 255.0
         self._h, self._s, self._v = colorsys.rgb_to_hsv(r, g, b)
 
-        self._sv_photo: Optional[tk.PhotoImage] = None
-        self._hue_photo: Optional[tk.PhotoImage] = None
-        self._grad_photo: Optional[tk.PhotoImage] = None
+        self._sv_photo: Any = None
+        self._hue_photo: Any = None
+        self._grad_photo: Any = None
 
         self._build_ui()
         self._render_hue_bar()
@@ -410,9 +416,13 @@ class NguiColorPickerPopup(tk.Toplevel):
         self._sync_ui_from_hsv()
 
         self.update_idletasks()
-        px = parent.winfo_rootx() + (parent.winfo_width() // 2) - (self.winfo_reqwidth() // 2)
-        py = parent.winfo_rooty() + (parent.winfo_height() // 2) - (self.winfo_reqheight() // 2)
-        self.geometry(f"+{max(20, px)}+{max(20, py)}")
+        req_w = max(390, self.winfo_reqwidth())
+        req_h = max(310, self.winfo_reqheight())
+        px = parent.winfo_rootx() + (parent.winfo_width() // 2) - (req_w // 2)
+        py = parent.winfo_rooty() + (parent.winfo_height() // 2) - (req_h // 2)
+        self.geometry(f"{req_w}x{req_h}+{max(20, px)}+{max(20, py)}")
+        self.minsize(req_w, req_h)
+        self.resizable(False, False)
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.bind("<Escape>", self._on_escape)
@@ -641,33 +651,70 @@ class NguiColorPickerPopup(tk.Toplevel):
         self._sync_ui_from_hsv()
 
     def _render_hue_bar(self) -> None:
-        img = tk.PhotoImage(width=self.HUE_W, height=self.HUE_H)
-        rows: List[str] = []
-        for y in range(self.HUE_H):
-            h = y / max(1, self.HUE_H - 1)
-            r, g, b = colorsys.hsv_to_rgb(h, 1.0, 1.0)
-            hx = f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
-            rows.append("{" + " ".join([hx] * self.HUE_W) + "}")
-        img.put(" ".join(rows))
+        w, h = self.HUE_W, self.HUE_H
+        if Image is not None and ImageTk is not None:
+            raw = bytearray(w * h * 3)
+            h_denom = max(1, h - 1)
+            idx = 0
+            for y in range(h):
+                hue = y / h_denom
+                r, g, b = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
+                rb = int(r * 255)
+                gb = int(g * 255)
+                bb = int(b * 255)
+                for _ in range(w):
+                    raw[idx] = rb
+                    raw[idx + 1] = gb
+                    raw[idx + 2] = bb
+                    idx += 3
+            im = Image.frombytes("RGB", (w, h), bytes(raw))
+            img = ImageTk.PhotoImage(im, master=self)
+        else:
+            img = tk.PhotoImage(master=self, width=w, height=h)
+            rows: List[str] = []
+            for y in range(h):
+                hue = y / max(1, h - 1)
+                r, g, b = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
+                hx = f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
+                rows.append("{" + " ".join([hx] * w) + "}")
+            img.put(" ".join(rows))
         self._hue_photo = img
         self.canvas_hue.delete("all")
         self.canvas_hue.create_image(0, 0, anchor="nw", image=img)
 
     def _render_sv_map(self) -> None:
-        img = tk.PhotoImage(width=self.SV_W, height=self.SV_H)
-        h = self._h
-        rows: List[str] = []
-        w_denom = max(1, self.SV_W - 1)
-        h_denom = max(1, self.SV_H - 1)
-        for y in range(self.SV_H):
-            v = 1.0 - (y / h_denom)
-            row_colors: List[str] = []
-            for x in range(self.SV_W):
-                s = x / w_denom
-                r, g, b = colorsys.hsv_to_rgb(h, s, v)
-                row_colors.append(f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}")
-            rows.append("{" + " ".join(row_colors) + "}")
-        img.put(" ".join(rows))
+        w, h = self.SV_W, self.SV_H
+        hue = self._h
+        if Image is not None and ImageTk is not None:
+            raw = bytearray(w * h * 3)
+            w_denom = max(1, w - 1)
+            h_denom = max(1, h - 1)
+            idx = 0
+            for y in range(h):
+                v = 1.0 - (y / h_denom)
+                for x in range(w):
+                    s = x / w_denom
+                    r, g, b = colorsys.hsv_to_rgb(hue, s, v)
+                    raw[idx] = int(r * 255)
+                    raw[idx + 1] = int(g * 255)
+                    raw[idx + 2] = int(b * 255)
+                    idx += 3
+            im = Image.frombytes("RGB", (w, h), bytes(raw))
+            img = ImageTk.PhotoImage(im, master=self)
+        else:
+            img = tk.PhotoImage(master=self, width=w, height=h)
+            rows = []
+            w_denom = max(1, w - 1)
+            h_denom = max(1, h - 1)
+            for y in range(h):
+                v = 1.0 - (y / h_denom)
+                row_colors: List[str] = []
+                for x in range(w):
+                    s = x / w_denom
+                    r, g, b = colorsys.hsv_to_rgb(hue, s, v)
+                    row_colors.append(f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}")
+                rows.append("{" + " ".join(row_colors) + "}")
+            img.put(" ".join(rows))
         self._sv_photo = img
         self.canvas_sv.delete("all")
         self.canvas_sv.create_image(0, 0, anchor="nw", image=img)
@@ -677,17 +724,34 @@ class NguiColorPickerPopup(tk.Toplevel):
         c1, c2 = self.stop_colors[0], self.stop_colors[1]
         r1, g1, b1 = int(c1[1:3], 16), int(c1[3:5], 16), int(c1[5:7], 16)
         r2, g2, b2 = int(c2[1:3], 16), int(c2[3:5], 16), int(c2[5:7], 16)
-        img = tk.PhotoImage(width=w, height=h)
-        rows: List[str] = []
-        denom = max(1, h - 1)
-        for y in range(h):
-            t = y / denom
-            r = int(r1 + (r2 - r1) * t)
-            g = int(g1 + (g2 - g1) * t)
-            b = int(b1 + (b2 - b1) * t)
-            hx = f"#{r:02x}{g:02x}{b:02x}"
-            rows.append("{" + " ".join([hx] * w) + "}")
-        img.put(" ".join(rows))
+        if Image is not None and ImageTk is not None:
+            raw = bytearray(w * h * 3)
+            denom = max(1, h - 1)
+            idx = 0
+            for y in range(h):
+                t = y / denom
+                r = int(r1 + (r2 - r1) * t)
+                g = int(g1 + (g2 - g1) * t)
+                b = int(b1 + (b2 - b1) * t)
+                for _ in range(w):
+                    raw[idx] = r
+                    raw[idx + 1] = g
+                    raw[idx + 2] = b
+                    idx += 3
+            im = Image.frombytes("RGB", (w, h), bytes(raw))
+            img = ImageTk.PhotoImage(im, master=self)
+        else:
+            img = tk.PhotoImage(master=self, width=w, height=h)
+            rows = []
+            denom = max(1, h - 1)
+            for y in range(h):
+                t = y / denom
+                r = int(r1 + (r2 - r1) * t)
+                g = int(g1 + (g2 - g1) * t)
+                b = int(b1 + (b2 - b1) * t)
+                hx = f"#{r:02x}{g:02x}{b:02x}"
+                rows.append("{" + " ".join([hx] * w) + "}")
+            img.put(" ".join(rows))
         self._grad_photo = img
         self.canvas_grad_preview.delete("all")
         self.canvas_grad_preview.create_image(0, 0, anchor="nw", image=img)
@@ -726,7 +790,7 @@ class NguiColorPickerPopup(tk.Toplevel):
         c0_code = self.stop_colors[0][1:].upper()
         c1_code = self.stop_colors[1][1:].upper()
         self.btn_insert_single.configure(text=f"Insert [{c0_code}]")
-        self.btn_insert_grad.configure(text=f"Insert [{c0_code}-{c1_code}]")
+        self.btn_insert_grad.configure(text=f"Insert [{c0_code},{c1_code}]")
 
         self.app._set_ribbon_colors(self.stop_colors[0], self.stop_colors[1])
 
@@ -798,27 +862,40 @@ class NguiColorPickerPopup(tk.Toplevel):
             user32 = ctypes.windll.user32
             gdi32 = ctypes.windll.gdi32
 
-            # Strict 64-bit safe signatures
-            user32.GetDC.restype = wintypes.HDC
-            user32.GetDC.argtypes = [wintypes.HWND]
-            user32.ReleaseDC.restype = ctypes.c_int
-            user32.ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
-            gdi32.GetPixel.restype = wintypes.COLORREF
-            gdi32.GetPixel.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int]
-
             pt = wintypes.POINT()
             user32.GetCursorPos(ctypes.byref(pt))
-            hdc = user32.GetDC(0)
-            try:
-                colorref = gdi32.GetPixel(hdc, pt.x, pt.y)
-            finally:
-                user32.ReleaseDC(0, hdc)
 
-            if colorref != -1 and colorref != 0xFFFFFFFF:
-                r = colorref & 0xFF
-                g = (colorref >> 8) & 0xFF
-                b = (colorref >> 16) & 0xFF
-                self._set_color_hex(f"#{r:02x}{g:02x}{b:02x}")
+            sampled_hex = None
+            if ImageGrab is not None:
+                try:
+                    px = ImageGrab.grab(bbox=(pt.x, pt.y, pt.x + 1, pt.y + 1)).getpixel((0, 0))
+                    sampled_hex = f"#{px[0]:02x}{px[1]:02x}{px[2]:02x}"
+                except Exception:
+                    pass
+
+            if not sampled_hex:
+                # Strict 64-bit safe signatures fallback
+                user32.GetDC.restype = wintypes.HDC
+                user32.GetDC.argtypes = [wintypes.HWND]
+                user32.ReleaseDC.restype = ctypes.c_int
+                user32.ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
+                gdi32.GetPixel.restype = wintypes.COLORREF
+                gdi32.GetPixel.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int]
+
+                hdc = user32.GetDC(0)
+                try:
+                    colorref = gdi32.GetPixel(hdc, pt.x, pt.y)
+                finally:
+                    user32.ReleaseDC(0, hdc)
+
+                if colorref != -1 and colorref != 0xFFFFFFFF:
+                    r = colorref & 0xFF
+                    g = (colorref >> 8) & 0xFF
+                    b = (colorref >> 16) & 0xFF
+                    sampled_hex = f"#{r:02x}{g:02x}{b:02x}"
+
+            if sampled_hex:
+                self._set_color_hex(sampled_hex)
 
             if user32.GetAsyncKeyState(0x1B) & 0x8000:
                 self._stop_eyedropper()
@@ -866,7 +943,7 @@ class NguiColorPickerPopup(tk.Toplevel):
         self._stop_eyedropper()
         c0 = self.stop_colors[0][1:].upper()
         c1 = self.stop_colors[1][1:].upper()
-        self.app.apply_ngui_wrapper(f"[{c0}-{c1}]", "[-]")
+        self.app.apply_ngui_wrapper(f"[{c0},{c1}]", "[-]")
         self._on_close()
 
     def _on_escape(self, _event: Optional[tk.Event] = None) -> None:
@@ -3457,7 +3534,7 @@ class MisoraApp(tk.Tk):
     def _apply_active_ribbon_gradient(self) -> None:
         c0 = self._active_ngui_color[1:].upper()
         c1 = self._active_ngui_grad_end[1:].upper()
-        self.apply_ngui_wrapper(f"[{c0}-{c1}]", "[-]")
+        self.apply_ngui_wrapper(f"[{c0},{c1}]", "[-]")
 
     def on_open_color_picker(self) -> None:
         if self._color_picker_win is not None and self._color_picker_win.winfo_exists():
@@ -4899,6 +4976,13 @@ class MisoraApp(tk.Tk):
             return None
 
         if ctrl and keysym.lower() in {"z", "y"}:
+            if keysym.lower() == "z":
+                if bool(event.state & 0x1):  # Ctrl+Shift+Z -> Redo
+                    self.on_redo()
+                else:
+                    self.on_undo()
+            elif keysym.lower() == "y":
+                self.on_redo()
             return "break"
 
         # Check for full selection delete (Keep skeleton only prompt)
