@@ -1,12 +1,12 @@
 # MISORA — PROJECT STATE
-*Last updated: 2026-11-18 — Takeover baseline archived, misora.bat crash resolved, ready for testing*
+*Last updated: 2026-11-18 — User verified misora.bat launch; user reported Bug 1 & 12 details; ready for fixes*
 
 ---
 
 ## SESSION HANDOFF / RESUME INSTRUCTIONS
-**Current step:** Baseline snapshot created in `_archive/20261118_takeover_baseline/` and git commit `db599f9`. Launcher crash in `misora.bat` fixed.  
-**Next action:** User launches `misora.bat` to confirm the app opens, reviews prioritized plan, and gives "go" for Step P0-1.  
-After "go": begin Step P0-1 (fix Ctrl+Z/Y block in Continuous key guard).
+**Current step:** App launches successfully. Diagnosed Bug #12 (Color picker window canvasses blank + truncated layout) and Bug #1 (DnD folder/prompt/filtering improvements).  
+**Next action:** Apply fix for Bug #12 (NGUI Color Picker popup Pillow/geometry fix) or P0-1 (Ctrl+Z/Y unblock).  
+Awaiting user confirmation to apply Bug #12 fix.
 
 ---
 
@@ -212,7 +212,7 @@ Bug #6: Buttons use `width=10` fixed. Spec says max = natural width of "Sub"/"Su
 
 | # | Bug | Status |
 |---|-----|--------|
-| 1 | DnD crashes (ctypes WM_DROPFILES) | UNVERIFIED — code structurally fixed; needs live DnD test |
+| 1 | DnD crashes (ctypes WM_DROPFILES) | FIXED & VERIFIED by user: Multi-file works; needs folder multi-file prompt & non-text format guard |
 | 2 | Config persists only fonts/theme | PARTIAL — paths persist; some toggles missing (geometry, Continuous/Preview, sync-XUAT) |
 | 3 | Undo/Redo absent; Ctrl+Z/Y blocked | PARTIAL — Undo wired but **BLOCKED** in Continuous (line 4901-4902) |
 | 4 | Theme misses some windows | UNVERIFIED — needs live test |
@@ -223,9 +223,9 @@ Bug #6: Buttons use `width=10` fixed. Spec says max = natural width of "Sub"/"Su
 | 9 | Continuous→Page lands wrong box | UNVERIFIED — needs live test |
 | 10 | Up arrow doesn't cross to prev box | DONE in code — lines 4867-4879 + 5291-5298 |
 | 11 | Delete blocked on multi-box selection | PARTIAL — on_clear_dialogue_skeleton exists; spec details unverified |
-| 12 | Eyedropper dead (DPI mismatch) | PARTIAL — SetProcessDpiAwareness(1) added; still ctypes GetPixel |
+| 12 | Eyedropper & Color window broken | CONFIRMED by user screenshot — PhotoImage put failure, truncated window, DPI issue |
 | 13 | NGUI_TOKEN_RE corrupted | NOT PRESENT — compiles clean |
-| 14 | Gradient separator comma vs hyphen | PARTIAL — inserts hyphen; parses both; corpus form unconfirmed |
+| 14 | Gradient separator comma vs hyphen | DECIDED: Ribbon inserts comma `[RRGGBB,RRGGBB]`; parser accepts both `[-,]` |
 | 15 | Plain .txt save "Nothing to Save" | LIKELY FIXED — code path exists; needs live test |
 | 16 | RRGGBBAA crashes preview; \n not rendered | UNVERIFIED |
 | 17 | Stale dark misora_config.json override | NOT PRESENT — current config is Purple & White |
@@ -238,9 +238,9 @@ Bug #6: Buttons use `width=10` fixed. Spec says max = natural width of "Sub"/"Su
 |----------|--------|
 | Theme default | Misora Purple & White confirmed in THEME_PRESETS and misora_config.json |
 | Gradient separator in regex | Both `[-,]` accepted in NGUI_TAG_RE and NGUI_TOKEN_RE |
-| Gradient ribbon insert | Currently uses hyphen; corpus form unknown — ASK USER |
-| Eyedropper approach | Currently ctypes GetPixel; Pillow ImageGrab approved per brief Section 1C — PROPOSE before switching |
-| DnD approach | Currently ctypes WM_DROPFILES; tkinterdnd2 approved per brief — PROPOSE before switching |
+| Gradient ribbon insert | Ribbon inserts comma format `[RRGGBB,RRGGBB]` per Section 4-D and user agreement |
+| Eyedropper & Color Map | Pillow `ImageTk.PhotoImage` + `ImageGrab` approved & installed |
+| DnD approach | Existing ctypes hook works for multi-file; add folder scan prompt + binary filter |
 | Test suite | 11 tests (11/11 pass); 3 more tests from brief DoD not yet written |
 
 ---
