@@ -537,7 +537,7 @@ class NguiColorPickerPopup(tk.Toplevel):
         hex_row = tk.Frame(side_col, bg=t["bg_panel"])
         hex_row.pack(fill="x", pady=2)
         tk.Label(hex_row, text="Hex:", font=("Segoe UI", 8, "bold"), bg=t["bg_panel"], fg=t["fg_muted"]).pack(side="left")
-        self.var_hex = tk.StringVar(value=self.stop_colors[0].upper())
+        self.var_hex = tk.StringVar(master=self, value=self.stop_colors[0].upper())
         ent_hex = tk.Entry(
             hex_row,
             textvariable=self.var_hex,
@@ -3410,7 +3410,7 @@ class MisoraApp(tk.Tk):
         apply_window_icon(dlg)
 
         tk.Label(dlg, text="Enter Attribute (e.g. （サマー） or (Summer)):", font=("Segoe UI", 9, "bold"), bg=t["bg_panel"], fg=best_contrast_fg(t["bg_panel"])).pack(padx=14, pady=(14, 6), anchor="w")
-        var_attr = tk.StringVar(value="（サマー）")
+        var_attr = tk.StringVar(master=dlg, value="（サマー）")
         ent = tk.Entry(dlg, textvariable=var_attr, font=("Segoe UI", 10), bg=t["bg_editor"], fg=best_contrast_fg(t["bg_editor"]))
         ent.pack(fill="x", padx=14, pady=4)
         ent.focus_set()
@@ -4303,7 +4303,7 @@ class MisoraApp(tk.Tk):
         row_base = tk.Frame(dlg, bg=t["bg_panel"])
         row_base.pack(fill="x", padx=14, pady=4)
         tk.Label(row_base, text="Base Text (Main):", width=16, anchor="w", bg=t["bg_panel"], fg=panel_fg).pack(side="left")
-        var_base = tk.StringVar(value=selected_base)
+        var_base = tk.StringVar(master=dlg, value=selected_base)
         ent_base = tk.Entry(
             row_base,
             textvariable=var_base,
@@ -4319,7 +4319,7 @@ class MisoraApp(tk.Tk):
         row_ruby = tk.Frame(dlg, bg=t["bg_panel"])
         row_ruby.pack(fill="x", padx=14, pady=4)
         tk.Label(row_ruby, text="Ruby Text (Top):", width=16, anchor="w", bg=t["bg_panel"], fg=panel_fg).pack(side="left")
-        var_ruby = tk.StringVar()
+        var_ruby = tk.StringVar(master=dlg)
         ent_ruby = tk.Entry(
             row_ruby,
             textvariable=var_ruby,
@@ -6625,7 +6625,7 @@ class MisoraApp(tk.Tk):
             dlg.configure(bg=t["bg_panel"])
 
             confirmed = [False]
-            skip_var = tk.BooleanVar(value=False)
+            skip_var = tk.BooleanVar(master=dlg, value=False)
 
             msg = f"Launch external datamine tool?\n\nProgram: {exe_path.name}\nPath: {exe_path}"
             tk.Label(dlg, text=msg, bg=t["bg_panel"], fg=best_contrast_fg(t["bg_panel"]), justify="left", wraplength=400).pack(padx=16, pady=(16, 8), fill="x")
@@ -6738,7 +6738,7 @@ class MisoraApp(tk.Tk):
         r1, ent_backup = make_row(content, "Backup Folder:")
         cur_bak = str(self.backup_folder) if self.backup_folder else str(SCRIPT_DIR / "backups")
         ent_backup.insert(0, cur_bak)
-        var_use_default_bak = tk.BooleanVar(value=(self.backup_folder is None))
+        var_use_default_bak = tk.BooleanVar(master=dlg, value=(self.backup_folder is None))
 
         def _browse_bak():
             d = filedialog.askdirectory(title="Select Backup Folder")
