@@ -548,6 +548,7 @@ class NguiColorPickerPopup(tk.Toplevel):
             insertbackground=t["misora_pink"],
             bd=1,
             relief="solid",
+            highlightthickness=0,
         )
         ent_hex.pack(side="right")
         ent_hex.bind("<Return>", self._on_hex_entry_commit)
@@ -1437,6 +1438,35 @@ class MisoraApp(tk.Tk):
                     w.configure(bg=t["bg_panel"], fg=t["border"])
                 elif role == "label_ribbon_sep":
                     w.configure(bg=t["bg_editor"], fg=t["border"])
+                elif role == "ribbon_primary_btn":
+                    w.configure(
+                        bg=t["misora_pink"],
+                        fg=accent_fg,
+                        activebackground=t["misora_pink_hover"],
+                        activeforeground=accent_fg,
+                    )
+                elif role == "ribbon_btn":
+                    dark_p = self._is_dark_color(t["bg_panel"])
+                    r_btn_bg = self._shift_hex(t["bg_panel"], 10 if dark_p else -8)
+                    r_btn_h = self._shift_hex(t["bg_panel"], 22 if dark_p else -16)
+                    r_btn_fg = best_contrast_fg(r_btn_bg, t["fg_text"], "#ffffff")
+                    w.configure(
+                        bg=r_btn_bg,
+                        fg=r_btn_fg,
+                        activebackground=r_btn_h,
+                        activeforeground=r_btn_fg,
+                    )
+                elif role in ("ribbon_undo_btn", "ribbon_redo_btn"):
+                    dark_p = self._is_dark_color(t["bg_panel"])
+                    r_btn_bg = self._shift_hex(t["bg_panel"], 10 if dark_p else -8)
+                    r_btn_h = self._shift_hex(t["bg_panel"], 22 if dark_p else -16)
+                    grn = t.get("accent_green", "#2e7d32")
+                    w.configure(
+                        bg=r_btn_bg,
+                        fg=grn,
+                        activebackground=r_btn_h,
+                        activeforeground=grn,
+                    )
                 elif role == "check_panel":
                     w.configure(
                         bg=t["bg_panel"],
@@ -1542,6 +1572,9 @@ class MisoraApp(tk.Tk):
             insertbackground=t["misora_pink"],
             selectbackground=t["highlight_bg"],
             selectforeground=hl_fg,
+            highlightthickness=0,
+            bd=1,
+            relief="solid",
         )
         self._configure_editor_rich_tags(self.txt_dialogue, d_fam, d_sz)
 
@@ -1552,7 +1585,16 @@ class MisoraApp(tk.Tk):
             insertbackground=t["misora_pink"],
             selectbackground=t["highlight_bg"],
             selectforeground=hl_fg,
+            highlightthickness=0,
+            bd=1,
+            relief="solid",
         )
+        if hasattr(self, "txt_raw"):
+            self.txt_raw.configure(
+                highlightthickness=0,
+                bd=1,
+                relief="solid",
+            )
         self.txt_continuous.tag_configure("cont_divider", foreground=t["misora_pink"], font=("Consolas", max(8, d_sz - 1), "bold"), spacing1=4, spacing3=2)
         self.txt_continuous.tag_configure("cont_badge", foreground=t["misora_pink"], font=("Consolas", max(8, d_sz - 2), "bold"))
         self.txt_continuous.tag_configure("cont_speaker", foreground=editor_fg, font=(d_fam, max(9, d_sz - 1), "bold"))
@@ -1640,7 +1682,7 @@ class MisoraApp(tk.Tk):
         hl_fg = best_contrast_fg(t["highlight_bg"], t["misora_pink"], "#ffffff")
         widget.tag_configure(
             "secret_whitespace",
-            background="#ffd6d6" if self._is_light_theme() else "#552020",
+            background="",
         )
         widget.tag_configure(
             "ngui_tag",
@@ -2410,19 +2452,17 @@ class MisoraApp(tk.Tk):
         view_menu.add_command(label="Toggle Customization Panel", command=lambda: self._toggle_side_drawer("customize"), accelerator="Ctrl+,")
         view_menu.add_command(label="Toggle NGUI Glossary Panel", command=lambda: self._toggle_side_drawer("glossary"), accelerator="F1")
         view_menu.add_separator()
-        self.var_show_line_numbers = tk.BooleanVar(value=self.show_line_numbers)
+        self.var_show_line_numbers = tk.BooleanVar(master=self, value=self.show_line_numbers)
         view_menu.add_checkbutton(
             label="Show Line Numbers (Vertical)",
             variable=self.var_show_line_numbers,
             command=self._on_toggle_line_numbers,
-            selectcolor=t["misora_pink"],
         )
-        self.var_show_column_ruler = tk.BooleanVar(value=self.show_column_ruler)
+        self.var_show_column_ruler = tk.BooleanVar(master=self, value=self.show_column_ruler)
         view_menu.add_checkbutton(
             label="Show Column Ruler (Horizontal)",
             variable=self.var_show_column_ruler,
             command=self._on_toggle_column_ruler,
-            selectcolor=t["misora_pink"],
         )
         menubar.add_cascade(label="View", menu=view_menu)
         self._all_menus.append(view_menu)
@@ -3194,6 +3234,15 @@ class MisoraApp(tk.Tk):
         self.lbl_voice_cue.pack(side="left", padx=(2, 4))
 
         # Compact NGUI Ribbon docked on the right side of the Speaker row
+        dark_p = self._is_dark_color(t["bg_panel"])
+        btn_bg = self._shift_hex(t["bg_panel"], 10 if dark_p else -8)
+        btn_hover = self._shift_hex(t["bg_panel"], 22 if dark_p else -16)
+        btn_fg = best_contrast_fg(btn_bg, t["fg_text"], "#ffffff")
+        accent_bg = t["misora_pink"]
+        accent_hover = t["misora_pink_hover"]
+        fg_accent = best_contrast_fg(accent_bg)
+        accent_green = t.get("accent_green", "#2e7d32")
+
         ribbon = self._tag_role(
             tk.Frame(speaker_ribbon_row, bg=t["bg_editor"], bd=1, relief="solid", highlightbackground=t["border"], highlightthickness=1),
             "ribbon"
@@ -3210,15 +3259,109 @@ class MisoraApp(tk.Tk):
             cursor="hand2",
             command=self.on_open_color_picker,
         )
-        self.btn_ribbon_swatch.pack(side="left", padx=(3, 1), pady=1)
+        self.btn_ribbon_swatch.pack(side="left", padx=(2, 1), pady=1)
 
-        ttk.Button(ribbon, text="Color", style="RibbonPrimary.TButton", command=self._apply_active_ribbon_color).pack(side="left", padx=1, pady=1)
-        ttk.Button(ribbon, text="Grad", style="RibbonPrimary.TButton", command=self._apply_active_ribbon_gradient).pack(side="left", padx=1, pady=1)
-        ttk.Button(ribbon, text="Ruby", style="RibbonPrimary.TButton", command=self.on_insert_ruby).pack(side="left", padx=1, pady=1)
-        ttk.Button(ribbon, text="[-]", style="Ribbon.TButton", command=lambda: self.apply_ngui_wrapper("[-]", "")).pack(side="left", padx=1, pady=1)
-        ttk.Button(ribbon, text="{player}", style="Ribbon.TButton", command=self.on_insert_playername).pack(side="left", padx=1, pady=1)
+        btn_color = self._tag_role(
+            tk.Button(
+                ribbon,
+                text="Color",
+                font=("Segoe UI", 8, "bold"),
+                bg=accent_bg,
+                fg=fg_accent,
+                activebackground=accent_hover,
+                activeforeground=fg_accent,
+                bd=1,
+                relief="raised",
+                padx=3,
+                pady=0,
+                cursor="hand2",
+                command=self._apply_active_ribbon_color,
+            ),
+            "ribbon_primary_btn",
+        )
+        btn_color.pack(side="left", padx=1, pady=1)
 
-        self._tag_role(tk.Label(ribbon, text="|", bg=t["bg_editor"], fg=t["border"]), "label_ribbon_sep").pack(side="left", padx=2)
+        btn_grad = self._tag_role(
+            tk.Button(
+                ribbon,
+                text="Grad",
+                font=("Segoe UI", 8, "bold"),
+                bg=accent_bg,
+                fg=fg_accent,
+                activebackground=accent_hover,
+                activeforeground=fg_accent,
+                bd=1,
+                relief="raised",
+                padx=3,
+                pady=0,
+                cursor="hand2",
+                command=self._apply_active_ribbon_gradient,
+            ),
+            "ribbon_primary_btn",
+        )
+        btn_grad.pack(side="left", padx=1, pady=1)
+
+        btn_ruby = self._tag_role(
+            tk.Button(
+                ribbon,
+                text="Ruby",
+                font=("Segoe UI", 8, "bold"),
+                bg=accent_bg,
+                fg=fg_accent,
+                activebackground=accent_hover,
+                activeforeground=fg_accent,
+                bd=1,
+                relief="raised",
+                padx=3,
+                pady=0,
+                cursor="hand2",
+                command=self.on_insert_ruby,
+            ),
+            "ribbon_primary_btn",
+        )
+        btn_ruby.pack(side="left", padx=1, pady=1)
+
+        btn_dash = self._tag_role(
+            tk.Button(
+                ribbon,
+                text="[-]",
+                font=("Segoe UI", 8, "bold"),
+                bg=btn_bg,
+                fg=btn_fg,
+                activebackground=btn_hover,
+                activeforeground=btn_fg,
+                bd=1,
+                relief="raised",
+                padx=2,
+                pady=0,
+                cursor="hand2",
+                command=lambda: self.apply_ngui_wrapper("[-]", ""),
+            ),
+            "ribbon_btn",
+        )
+        btn_dash.pack(side="left", padx=1, pady=1)
+
+        btn_player = self._tag_role(
+            tk.Button(
+                ribbon,
+                text="{player}",
+                font=("Segoe UI", 8, "bold"),
+                bg=btn_bg,
+                fg=btn_fg,
+                activebackground=btn_hover,
+                activeforeground=btn_fg,
+                bd=1,
+                relief="raised",
+                padx=2,
+                pady=0,
+                cursor="hand2",
+                command=self.on_insert_playername,
+            ),
+            "ribbon_btn",
+        )
+        btn_player.pack(side="left", padx=1, pady=1)
+
+        self._tag_role(tk.Label(ribbon, text="|", bg=t["bg_editor"], fg=t["border"]), "label_ribbon_sep").pack(side="left", padx=1)
 
         mini_style_buttons = [
             ("B", "[b]", "[/b]"),
@@ -3229,36 +3372,75 @@ class MisoraApp(tk.Tk):
             ("Sup", "[sup]", "[/sup]"),
         ]
         for lbl, o_tag, c_tag in mini_style_buttons:
-            # Bug 10: NO width kwarg — ttk auto-sizes to label text (narrowest)
-            ttk.Button(
+            w_val = 2 if len(lbl) <= 2 else 3
+            f_sz = 8 if len(lbl) <= 2 else 7
+            b_mini = self._tag_role(
+                tk.Button(
+                    ribbon,
+                    text=lbl,
+                    font=("Segoe UI", f_sz, "bold"),
+                    bg=btn_bg,
+                    fg=btn_fg,
+                    activebackground=btn_hover,
+                    activeforeground=btn_fg,
+                    bd=1,
+                    relief="raised",
+                    width=w_val,
+                    padx=0,
+                    pady=0,
+                    cursor="hand2",
+                    command=lambda ot=o_tag, ct=c_tag: self.apply_ngui_wrapper(ot, ct),
+                ),
+                "ribbon_btn",
+            )
+            b_mini.pack(side="left", padx=1, pady=1)
+
+        self._tag_role(tk.Label(ribbon, text="|", bg=t["bg_editor"], fg=t["border"]), "label_ribbon_sep").pack(side="left", padx=1)
+
+        # Explicit Undo & Redo buttons per Image 2 specification
+        self.btn_ribbon_undo = self._tag_role(
+            tk.Button(
                 ribbon,
-                text=lbl,
-                style="RibbonMini.TButton",
-                command=lambda ot=o_tag, ct=c_tag: self.apply_ngui_wrapper(ot, ct),
-            ).pack(side="left", padx=1, pady=1)
-
-        self._tag_role(tk.Label(ribbon, text="|", bg=t["bg_editor"], fg=t["border"]), "label_ribbon_sep").pack(side="left", padx=2)
-
-        # Explicit Undo & Redo buttons (#10)
-        self.btn_ribbon_undo = ttk.Button(
-            ribbon,
-            text="↶",
-            style="RibbonMini.TButton",
-            width=2,
-            command=self.on_undo,
+                text="↶",
+                font=("Segoe UI", 9, "bold"),
+                bg=btn_bg,
+                fg=accent_green,
+                activebackground=btn_hover,
+                activeforeground=accent_green,
+                bd=1,
+                relief="raised",
+                width=2,
+                padx=0,
+                pady=0,
+                cursor="hand2",
+                command=self.on_undo,
+            ),
+            "ribbon_undo_btn",
         )
         self.btn_ribbon_undo.pack(side="left", padx=1, pady=1)
 
-        self.btn_ribbon_redo = ttk.Button(
-            ribbon,
-            text="↷",
-            style="RibbonMini.TButton",
-            width=2,
-            command=self.on_redo,
+        self.btn_ribbon_redo = self._tag_role(
+            tk.Button(
+                ribbon,
+                text="↷",
+                font=("Segoe UI", 9, "bold"),
+                bg=btn_bg,
+                fg=accent_green,
+                activebackground=btn_hover,
+                activeforeground=accent_green,
+                bd=1,
+                relief="raised",
+                width=2,
+                padx=0,
+                pady=0,
+                cursor="hand2",
+                command=self.on_redo,
+            ),
+            "ribbon_redo_btn",
         )
         self.btn_ribbon_redo.pack(side="left", padx=1, pady=1)
 
-        self._tag_role(tk.Label(ribbon, text="|", bg=t["bg_editor"], fg=t["border"]), "label_ribbon_sep").pack(side="left", padx=2)
+        self._tag_role(tk.Label(ribbon, text="|", bg=t["bg_editor"], fg=t["border"]), "label_ribbon_sep").pack(side="left", padx=1)
 
         cb_compiled = self._tag_role(
             tk.Checkbutton(
@@ -3370,6 +3552,8 @@ class MisoraApp(tk.Tk):
             spacing3=3,
             bd=1,
             relief="solid",
+            highlightthickness=0,
+            undo=False,
         )
         self.txt_dialogue.pack(side="left", fill="both", expand=True)
         self._configure_editor_rich_tags(self.txt_dialogue, d_fam, d_sz)
@@ -3732,6 +3916,10 @@ class MisoraApp(tk.Tk):
             else:
                 if self._is_widget_packed(self.gutter_cont):
                     self.gutter_cont.pack_forget()
+        if hasattr(self, "gd_inner"):
+            self.gd_inner.update_idletasks()
+            self._sync_gd_scroll_bounds()
+        self.show_toast(f"Line numbers {'enabled' if visible else 'hidden'}")
         self._save_user_prefs(silent=True)
 
     def _on_toggle_column_ruler(self) -> None:
@@ -3758,6 +3946,10 @@ class MisoraApp(tk.Tk):
             else:
                 if self._is_widget_packed(self.ruler_cont):
                     self.ruler_cont.pack_forget()
+        if hasattr(self, "gd_inner"):
+            self.gd_inner.update_idletasks()
+            self._sync_gd_scroll_bounds()
+        self.show_toast(f"Column ruler {'enabled' if visible else 'hidden'}")
         self._save_user_prefs(silent=True)
 
     def _update_gutter_clean(self) -> None:
@@ -3804,14 +3996,9 @@ class MisoraApp(tk.Tk):
             pass
 
     def _highlight_secret_whitespace(self, text_widget: tk.Text) -> None:
-        """Detect and highlight unintended trailing whitespaces or blank tabs/spaces."""
+        """Clear any residual whitespace highlighting to prevent visual artifacts."""
         try:
             text_widget.tag_remove("secret_whitespace", "1.0", tk.END)
-            content = text_widget.get("1.0", tk.END)
-            for m in re.finditer(r"[ \t]+(?=\n|$)", content):
-                s_idx = f"1.0 + {m.start()}c"
-                e_idx = f"1.0 + {m.end()}c"
-                text_widget.tag_add("secret_whitespace", s_idx, e_idx)
         except Exception:
             pass
 
@@ -4171,7 +4358,7 @@ class MisoraApp(tk.Tk):
         cb_preset = ttk.Combobox(
             preset_row,
             textvariable=self.var_preset,
-            values=list(THEME_PRESETS.keys()),
+            values=list(THEME_PRESETS.keys()) + ["Custom"],
             state="readonly",
             width=22,
         )
@@ -4425,6 +4612,8 @@ class MisoraApp(tk.Tk):
             hvar.set(self.theme.get(key, ""))
 
     def _apply_theme_preset(self, preset_name: str) -> None:
+        if preset_name == "Custom":
+            return
         preset = THEME_PRESETS.get(preset_name)
         if not preset:
             return
@@ -4622,6 +4811,7 @@ class MisoraApp(tk.Tk):
             insertbackground=t["misora_pink"],
             bd=1,
             relief="solid",
+            highlightthickness=0,
         )
         ent_base.pack(side="left", fill="x", expand=True)
 
@@ -4638,6 +4828,7 @@ class MisoraApp(tk.Tk):
             insertbackground=t["misora_pink"],
             bd=1,
             relief="solid",
+            highlightthickness=0,
         )
         ent_ruby.pack(side="left", fill="x", expand=True)
 

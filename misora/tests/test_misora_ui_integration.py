@@ -13,6 +13,8 @@ from pathlib import Path
 
 import importlib.util
 
+from core.story_ast import Record, StoryDocument
+
 TESTS_DIR = Path(__file__).resolve().parent
 MISORA_DIR = TESTS_DIR.parent
 if str(MISORA_DIR) not in sys.path:
@@ -213,6 +215,41 @@ class TestMisoraUIIntegration(unittest.TestCase):
         self.app._commit_theme_hex("bg_dark")
         self.assertEqual(self.app.theme["bg_dark"], test_color)
         self.assertEqual(self.app._theme_swatch_buttons["bg_dark"].cget("bg"), test_color)
+
+    def test_11_ribbon_compact_buttons_and_undo_redo(self):
+        """Ribbon buttons are compact (<= 500px total) and explicit Undo/Redo buttons exist."""
+        self.assertTrue(hasattr(self.app, "btn_ribbon_undo"))
+        self.assertTrue(hasattr(self.app, "btn_ribbon_redo"))
+        self.assertEqual(self.app.btn_ribbon_undo.cget("text"), "↶")
+        self.assertEqual(self.app.btn_ribbon_redo.cget("text"), "↷")
+
+        ribbon = self.app.btn_ribbon_swatch.master
+        self.app.update_idletasks()
+        total_w = ribbon.winfo_reqwidth()
+        self.assertLessEqual(total_w, 550, f"Ribbon width {total_w}px exceeded 550px limit")
+
+    def test_12_inject_box_no_trailing_spaces(self):
+        """Injecting text into multi-segment box does not add trailing spaces."""
+        recs = [
+            Record(cmd_id=6, cmd_name="print", args=["Pecorine", "First line"]),
+            Record(cmd_id=6, cmd_name="print", args=["Pecorine", "\n"]),
+            Record(cmd_id=6, cmd_name="print", args=["Pecorine", "Second line"]),
+        ]
+        doc = StoryDocument(recs)
+        self.assertEqual(len(doc.boxes), 1)
+        self.assertEqual(len(doc.boxes[0].segs), 3)
+
+        doc.inject_box(0, "Pecorine", "New Dialogue Text")
+        clean = doc.boxes[0].clean_text
+        self.assertEqual(clean, "New Dialogue Text")
+        self.assertFalse(clean.endswith(" "), "clean_text should not end with trailing space")
+
+    def test_13_editor_clean_one_pixel_borders(self):
+        """Text editors have highlightthickness=0 for clean 1px border."""
+        self.assertEqual(int(self.app.txt_dialogue.cget("highlightthickness")), 0)
+        self.assertEqual(int(self.app.txt_continuous.cget("highlightthickness")), 0)
+        self.assertEqual(int(self.app.txt_raw.cget("highlightthickness")), 0)
+        self.assertEqual(int(self.app.txt_dialogue.cget("bd")), 1)
 
 
 if __name__ == "__main__":

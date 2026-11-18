@@ -247,7 +247,7 @@ class StoryDocument:
                 seen.append(b.speaker)
         return seen
 
-    def inject_box(self, box_index: int, new_speaker: Optional[str], new_text: str, fill: str = " ") -> None:
+    def inject_box(self, box_index: int, new_speaker: Optional[str], new_text: str, fill: str = "") -> None:
         """
         Update a dialogue box in-place, redistributing new text across underlying binary segments.
         Ensures any {playername} placeholder is safely converted to {0} for the game engine.
