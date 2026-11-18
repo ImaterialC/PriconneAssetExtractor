@@ -1,22 +1,30 @@
 # MISORA — PROJECT STATE
-*Last updated: 2026-11-18 — Bug #12 verified; DnD logic flow overhauled & Scope naming updated to "Current File(s)"*
+*Last updated: 2026-11-18 — Find UI [...] placement, Project Scope path display, Folder DnD 'No' path population, and Configure Paths Dialog overhaul complete*
 
 ---
 
 ## SESSION HANDOFF / RESUME INSTRUCTIONS
 **Current step:**
 1. Bug #12 (NGUI Color & Gradient Picker): Confirmed working and complete by user ("yes it complete and work well").
-2. DnD Logic Flow Overhaul (`f13b4c5`):
-   - Scope is NO LONGER prematurely switched to "folder" before user confirms the action prompt.
-   - If user chooses **Cancel**: Complete abort — scope and search folders are untouched, preserving whatever prior state the user had (`Project`, `Folder`, or `Current File(s)`).
-   - If user chooses **Yes (Open all files)**: Opens files into editor tabs and intelligently sets search scope to `Current File(s)`.
-   - If user chooses **No (Set search scope)**: Only now sets `selected_search_folder` and switches scope to `Folder`.
-3. UI Naming & Search Capability:
-   - Scope radio button updated from "Current File" to **"Current File(s)"**.
-   - Searching under `Current File(s)` now searches across all currently opened documents/tabs (`self.open_documents.keys()`).
-4. Unit tests: 11/11 passing.
+2. Find UI Layout & Window Snapping UX:
+   - Placed `[...]` browse button to the LEFT of the directory entry (`[...] [ Directory Path Entry (expand=True) ]`).
+   - Directory entry expanded across remaining horizontal space (`fill="x", expand=True`) so resizing / window snapping gracefully shrinks the entry without clipping the browse button.
+3. Project Scope Directory Path:
+   - When Scope is `Project`: displays project path (from `bepinex_project_folder`, `xuat_search_roots`, or parent), and `[...]` lets the user browse and configure the project folder.
+   - When Scope is `Folder`: displays `selected_search_folder`, and `[...]` lets the user browse search folder.
+   - When Scope is `Current File(s)`: displays active document directory, entry is read-only, `[...]` is disabled.
+4. DnD Folder Drop "No":
+   - When user selects "No" (set search scope to folder, open nothing): immediately populates `self.folder_path_var.set(str(folder))`, switches scope to `Folder`, syncs widgets, and displays a toast notification.
+5. "Configure Paths, Backups & Folders" Dialog Overhaul:
+   - Fixed packing order: bottom button bar (`btn_bar`) packed `side="bottom", fill="x"` first so Save & Apply / Cancel buttons can never be clipped or hidden.
+   - Fixed row layout: `make_row` packs browse and open buttons `side="right"` before the entry is packed `side="left", fill="x", expand=True`, ensuring all buttons remain anchored on the right and entries expand to fill the available space.
+   - Restored and organized all rows: Backup Folder (with Browse & Open buttons, default checkbox), BepInEx Project Folder (with Browse & Open buttons), Datamine Tool (with Browse button), Notepad++ Executable (with Browse button), External Text Editor (with Browse button), Config File (with Reveal in Explorer), Debug Log (with Open button).
+   - Added `show_toast("Paths and backup settings saved successfully!")` on save.
+6. Folders & Files Menu Extensions:
+   - Added: Open Backups Folder, Open BepInEx Translation Folder, Open XUAT Text Folder, Open RedirectedResources Folder, Open Selected Search Folder, Open Misora Program Folder.
+7. Unit tests: 11/11 passing.
 
-**Next action:** Await user verification of the overhauled DnD flow and `Current File(s)` search, then proceed to Bug #15 (Plain `.txt` save verification) or next priority tasks.
+**Next action:** Await user verification of the Find UI, Project path display, and Configure Paths dialog, then proceed to Bug #15 (Plain `.txt` save verification) or next priority tasks.
 
 ---
 

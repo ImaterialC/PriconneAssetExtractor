@@ -2003,11 +2003,13 @@ class MisoraApp(tk.Tk):
                 )
                 if not story_files:
                     self.selected_search_folder = folder
+                    self.folder_path_var.set(str(folder))
                     self.scope_var.set("folder")
                     self._sync_scope_widgets()
                     self.lbl_status.config(
                         text=f"Search scope set to folder: '{folder.name}' (no .unity3d/.asset/.txt files found to open)"
                     )
+                    self.show_toast(f"Search folder set to: {folder.name}")
                 elif len(story_files) == 1:
                     try:
                         self.open_file(story_files[0])
@@ -2047,11 +2049,13 @@ class MisoraApp(tk.Tk):
                     elif ans is False:
                         # "No" = Set search scope to this folder only (open nothing)
                         self.selected_search_folder = folder
+                        self.folder_path_var.set(str(folder))
                         self.scope_var.set("folder")
                         self._sync_scope_widgets()
                         self.lbl_status.config(
                             text=f"Search scope set to folder: '{folder.name}' ({len(story_files)} story file(s) found). No files opened."
                         )
+                        self.show_toast(f"Search folder set to: {folder.name}")
                     else:
                         # "Cancel" = Abort: do nothing, touch nothing!
                         self.lbl_status.config(text="Folder drop cancelled. No changes made.")
@@ -2490,6 +2494,18 @@ class MisoraApp(tk.Tk):
             command=self.on_open_bepinex_folder,
         )
         folders_menu.add_command(
+            label="Open XUAT Text Folder",
+            command=self.on_open_xuat_text_folder,
+        )
+        folders_menu.add_command(
+            label="Open RedirectedResources Folder",
+            command=self.on_open_redirected_resources_folder,
+        )
+        folders_menu.add_command(
+            label="Open Selected Search Folder",
+            command=self.on_open_selected_search_folder,
+        )
+        folders_menu.add_command(
             label="Open Misora Program Folder",
             command=self.on_open_program_folder,
         )
@@ -2771,7 +2787,7 @@ class MisoraApp(tk.Tk):
         )
         cb_ws.pack(side="left", padx=4)
 
-        self._tag_role(tk.Label(row2, text="|", bg=t["bg_panel"], fg=t["border"]), "label_sep").pack(side="left", padx=8)
+        self._tag_role(tk.Label(row2, text="|", bg=t["bg_panel"], fg=t["border"]), "label_sep").pack(side="left", padx=6)
 
         self._tag_role(tk.Label(row2, text="Scope:", bg=t["bg_panel"], fg=t["fg_muted"]), "label_muted").pack(side="left", padx=(0, 4))
         self.scope_var = tk.StringVar(master=self, value="project")
@@ -2782,27 +2798,10 @@ class MisoraApp(tk.Tk):
         self.rb_folder = ttk.Radiobutton(row2, text="Folder", variable=self.scope_var, value="folder", style="Panel.TRadiobutton", command=self._sync_scope_widgets)
         self.rb_folder.pack(side="left", padx=2)
 
-        # Folder path entry + browse button (visible when Scope == 'folder')
-        self.folder_path_var = tk.StringVar(value="")
-        self.folder_path_entry = self._tag_role(
-            tk.Entry(
-                row2,
-                textvariable=self.folder_path_var,
-                font=("Segoe UI", 8),
-                width=16,
-                bg=t["bg_editor"],
-                fg=t["fg_text"],
-                bd=1,
-                relief="solid",
-            ),
-            "entry_editor"
-        )
-        self.btn_browse_search_folder = ttk.Button(row2, text="...", style="Small.TButton", command=self.on_open_folder, width=2)
-
         self.rb_cur = ttk.Radiobutton(row2, text="Current File(s)", variable=self.scope_var, value="current", style="Panel.TRadiobutton", command=self._sync_scope_widgets)
         self.rb_cur.pack(side="left", padx=2)
 
-        self._tag_role(tk.Label(row2, text="|", bg=t["bg_panel"], fg=t["border"]), "label_sep").pack(side="left", padx=8)
+        self._tag_role(tk.Label(row2, text="|", bg=t["bg_panel"], fg=t["border"]), "label_sep").pack(side="left", padx=6)
         cb_bdl = self._tag_role(
             tk.Checkbutton(row2, text=".unity3d", variable=self.var_inc_bundles, bg=t["bg_panel"], fg=t["fg_text"], selectcolor=t["bg_dark"], activebackground=t["bg_panel"]),
             "check_panel"
@@ -2814,9 +2813,35 @@ class MisoraApp(tk.Tk):
         )
         cb_txt.pack(side="left", padx=2)
 
+        self._tag_role(tk.Label(row2, text="|", bg=t["bg_panel"], fg=t["border"]), "label_sep").pack(side="left", padx=6)
+
+        # Browse [...] button on LEFT of entry
+        self.btn_browse_search_folder = ttk.Button(row2, text="...", style="Small.TButton", command=self.on_browse_scope_path, width=3)
+        self.btn_browse_search_folder.pack(side="left", padx=(0, 2))
+
+        # Directory path entry on RIGHT of [...], expands to fill remaining space
+        self.folder_path_var = tk.StringVar(master=self, value="")
+        self.folder_path_entry = self._tag_role(
+            tk.Entry(
+                row2,
+                textvariable=self.folder_path_var,
+                font=("Segoe UI", 9),
+                bg=t["bg_editor"],
+                fg=t["fg_text"],
+                bd=1,
+                relief="solid",
+            ),
+            "entry_editor"
+        )
+        self.folder_path_entry.pack(side="left", fill="x", expand=True, padx=(0, 2))
+        self.folder_path_entry.bind("<Return>", lambda e: self.on_start_search())
+
         self.progress_bar = ttk.Progressbar(self.search_frame, mode="determinate")
         self.progress_bar.pack(fill="x", padx=8, pady=(0, 2))
         self.progress_bar.pack_forget()
+
+        # Initialize scope widgets with project path
+        self._sync_scope_widgets()
 
     # -------------------------------------------------------------------------
     # Main Workspace (#4 Distinct Nav Buttons, #5/#6 Clean Header, #7 Inline Ribbon)
@@ -5843,6 +5868,9 @@ class MisoraApp(tk.Tk):
                 messagebox.showinfo("Search", "No file is currently open.")
                 return
         elif scope == "folder":
+            ent_val = self.folder_path_var.get().strip() if hasattr(self, "folder_path_var") else ""
+            if ent_val and Path(ent_val).is_dir():
+                self.selected_search_folder = Path(ent_val)
             if self.selected_search_folder and self.selected_search_folder.is_dir():
                 target_paths = [self.selected_search_folder]
             else:
@@ -5850,9 +5878,18 @@ class MisoraApp(tk.Tk):
                 if not fld:
                     return
                 self.selected_search_folder = Path(fld)
+                self.folder_path_var.set(str(fld))
                 target_paths = [self.selected_search_folder]
         else:
+            ent_val = self.folder_path_var.get().strip() if hasattr(self, "folder_path_var") else ""
+            if ent_val and Path(ent_val).is_dir():
+                self.bepinex_project_folder = Path(ent_val)
             target_paths = list(self.xuat_search_roots)
+            if self.bepinex_project_folder and self.bepinex_project_folder.exists():
+                text_dir = self.bepinex_project_folder / "Text"
+                root = text_dir if text_dir.exists() else self.bepinex_project_folder
+                if root not in target_paths:
+                    target_paths.insert(0, root)
             for p in (Path("input"), Path("output"), SCRIPT_DIR.parent / "input", SCRIPT_DIR.parent / "output"):
                 if p.exists() and p not in target_paths:
                     target_paths.append(p)
@@ -6181,7 +6218,7 @@ class MisoraApp(tk.Tk):
         init_dir = str(self.selected_search_folder) if getattr(self, "selected_search_folder", None) and self.selected_search_folder.exists() else (
             str(self.last_opened_dir) if getattr(self, "last_opened_dir", None) and self.last_opened_dir.exists() else None
         )
-        f = filedialog.askdirectory(initialdir=init_dir, title="Open Project or Asset Folder")
+        f = filedialog.askdirectory(initialdir=init_dir, title="Open Folder (Search Scope)")
         if f:
             folder = Path(f)
             self.selected_search_folder = folder
@@ -6190,7 +6227,7 @@ class MisoraApp(tk.Tk):
             self.scope_var.set("folder")
             self._sync_scope_widgets()
             self._save_user_prefs(silent=True)
-            # Bug 4 fix: scan folder and open first story file
+            # Scan folder and open first story file if any
             story_files = (
                 sorted(folder.glob("*.unity3d")) +
                 sorted(folder.glob("*.asset")) +
@@ -6199,22 +6236,70 @@ class MisoraApp(tk.Tk):
             if story_files:
                 self.open_file(story_files[0])
                 self.lbl_status.config(
-                    text=f"Opened \"{story_files[0].name}\" ({len(story_files)} story file(s) in folder). Scope → folder."
+                    text=f"Opened \"{story_files[0].name}\" ({len(story_files)} story file(s) in folder). Scope set to Folder."
                 )
             else:
                 self.lbl_status.config(text=f"Folder set for search: {f} (no .unity3d/.asset/.txt files found)")
+            self.show_toast(f"Search folder set to: {folder.name}")
+
+    def _get_project_display_path(self) -> str:
+        """Return the effective project directory path."""
+        if getattr(self, "bepinex_project_folder", None) and Path(self.bepinex_project_folder).exists():
+            return str(self.bepinex_project_folder)
+        if getattr(self, "xuat_search_roots", None) and self.xuat_search_roots:
+            return str(self.xuat_search_roots[0])
+        return str(SCRIPT_DIR.parent)
 
     def _sync_scope_widgets(self) -> None:
-        """Show or hide folder path entry and browse button based on scope selection."""
-        if hasattr(self, "folder_path_entry") and hasattr(self, "btn_browse_search_folder"):
-            if self.scope_var.get() == "folder":
-                self.folder_path_entry.pack(side="left", padx=2)
-                self.btn_browse_search_folder.pack(side="left", padx=(0, 4))
-                if self.selected_search_folder:
-                    self.folder_path_var.set(str(self.selected_search_folder))
+        """Update folder/project path entry and browse button based on scope selection."""
+        if not (hasattr(self, "folder_path_entry") and hasattr(self, "btn_browse_search_folder")):
+            return
+        scope = self.scope_var.get()
+        if scope == "folder":
+            self.folder_path_entry.config(state="normal")
+            self.btn_browse_search_folder.config(state="normal")
+            if getattr(self, "selected_search_folder", None):
+                self.folder_path_var.set(str(self.selected_search_folder))
             else:
-                self.folder_path_entry.pack_forget()
-                self.btn_browse_search_folder.pack_forget()
+                self.folder_path_var.set("")
+        elif scope == "project":
+            self.folder_path_entry.config(state="normal")
+            self.btn_browse_search_folder.config(state="normal")
+            self.folder_path_var.set(self._get_project_display_path())
+        else:  # "current"
+            if getattr(self, "current_file_path", None):
+                self.folder_path_var.set(str(self.current_file_path.parent))
+            elif getattr(self, "open_documents", None) and self.open_documents:
+                first_path = next(iter(self.open_documents.keys()))
+                self.folder_path_var.set(str(first_path.parent) if isinstance(first_path, Path) else "(Current Open Files)")
+            else:
+                self.folder_path_var.set("(Current Open Files)")
+            self.folder_path_entry.config(state="readonly")
+            self.btn_browse_search_folder.config(state="disabled")
+
+    def on_browse_scope_path(self) -> None:
+        """Browse button handler for the active search scope ([...] on left of directory entry)."""
+        scope = self.scope_var.get()
+        if scope == "project":
+            self.on_browse_project_folder()
+        elif scope == "folder":
+            self.on_open_folder()
+
+    def on_browse_project_folder(self) -> None:
+        """Browse and configure the BepInEx Project Folder."""
+        init_dir = str(self.bepinex_project_folder) if getattr(self, "bepinex_project_folder", None) and self.bepinex_project_folder.exists() else str(SCRIPT_DIR.parent)
+        d = filedialog.askdirectory(initialdir=init_dir, title="Select BepInEx Project / Root Folder")
+        if d:
+            p = Path(d)
+            self.bepinex_project_folder = p
+            self.folder_path_var.set(str(p))
+            text_dir = p / "Text"
+            root = text_dir if text_dir.exists() else p
+            if root not in self.xuat_search_roots:
+                self.xuat_search_roots.insert(0, root)
+            self._save_user_prefs(silent=True)
+            self.lbl_status.config(text=f"Project folder set to: {p}")
+            self.show_toast(f"Project folder set to: {p.name}")
 
     # -------------------------------------------------------------------------
     # Search & Replace Actions (Find, Replace, Replace All, Multi-File Confirmation)
@@ -6224,6 +6309,7 @@ class MisoraApp(tk.Tk):
             # search_frame and h_paned are both direct children of self (root)
             self.search_frame.pack(before=self.h_paned, fill="x", padx=8, pady=(6, 4))
             self._search_bar_visible = True
+        self._sync_scope_widgets()
         if getattr(self, "_replace_row_visible", False):
             self.row_replace.pack_forget()
             self._replace_row_visible = False
@@ -6928,13 +7014,56 @@ class MisoraApp(tk.Tk):
     def on_open_program_folder(self) -> None:
         subprocess.Popen(["explorer.exe", str(SCRIPT_DIR)])
 
+    def on_open_xuat_text_folder(self) -> None:
+        """Open the XUAT Text translation directory in Windows Explorer."""
+        p: Optional[Path] = None
+        if self.bepinex_project_folder:
+            cand = self.bepinex_project_folder / "Text"
+            if cand.is_dir():
+                p = cand
+        if not p and getattr(self, "xuat_search_roots", None):
+            for r in self.xuat_search_roots:
+                if r.is_dir():
+                    if r.name.lower() == "text":
+                        p = r
+                        break
+                    if (r / "Text").is_dir():
+                        p = r / "Text"
+                        break
+        if p and p.exists():
+            subprocess.Popen(["explorer.exe", str(p)])
+        else:
+            messagebox.showinfo("XUAT Text Folder", "XUAT Text folder could not be found. Configure the BepInEx Project Folder in 'Configure Paths & Backups...'.")
+
+    def on_open_redirected_resources_folder(self) -> None:
+        """Open the BepInEx RedirectedResources directory in Windows Explorer."""
+        p: Optional[Path] = None
+        if self.bepinex_project_folder:
+            cand1 = self.bepinex_project_folder / "RedirectedResources"
+            cand2 = self.bepinex_project_folder.parent / "RedirectedResources"
+            if cand1.is_dir():
+                p = cand1
+            elif cand2.is_dir():
+                p = cand2
+        if p and p.exists():
+            subprocess.Popen(["explorer.exe", str(p)])
+        else:
+            messagebox.showinfo("RedirectedResources Folder", "RedirectedResources folder could not be found. Configure the BepInEx Project Folder in 'Configure Paths & Backups...'.")
+
+    def on_open_selected_search_folder(self) -> None:
+        """Open the currently selected search folder in Windows Explorer."""
+        if getattr(self, "selected_search_folder", None) and Path(self.selected_search_folder).is_dir():
+            subprocess.Popen(["explorer.exe", str(self.selected_search_folder)])
+        else:
+            messagebox.showinfo("Search Folder", "No search folder is currently set. Choose one using the [...] button in the search bar or drag & drop a folder.")
+
     def on_open_paths_dialog(self) -> None:
-        """Dialog to configure Backup Folder, BepInEx Folder, Config, and External Programs."""
+        """Dialog to configure Backup Folder, BepInEx Folder, Datamine Tool, External Editors, Config, and Debug Log."""
         t = self.theme
         dlg = tk.Toplevel(self)
         dlg.title("Configure Paths, Backups & Folders")
-        dlg.geometry("620x460")
-        dlg.minsize(560, 400)
+        dlg.geometry("660x520")
+        dlg.minsize(600, 460)
         dlg.transient(self)
         dlg.grab_set()
         dlg.configure(bg=t["bg_panel"])
@@ -6942,24 +7071,30 @@ class MisoraApp(tk.Tk):
         fg_panel = best_contrast_fg(t["bg_panel"])
         fg_editor = best_contrast_fg(t["bg_editor"])
 
-        content = tk.Frame(dlg, bg=t["bg_panel"], padx=16, pady=12)
-        content.pack(fill="both", expand=True)
+        # 1. Pack bottom button bar FIRST so it stays anchored and visible
+        btn_bar = tk.Frame(dlg, bg=t["bg_panel"], padx=16, pady=12)
+        btn_bar.pack(side="bottom", fill="x")
 
-        def make_row(parent, label_text):
+        # 2. Main content frame
+        content = tk.Frame(dlg, bg=t["bg_panel"], padx=16, pady=12)
+        content.pack(side="top", fill="both", expand=True)
+
+        def make_row(parent, label_text: str, browse_cmd=None, open_cmd=None, browse_text="Browse..."):
             r = tk.Frame(parent, bg=t["bg_panel"])
             r.pack(fill="x", pady=4)
-            lbl = tk.Label(r, text=label_text, font=("Segoe UI", 9, "bold"), bg=t["bg_panel"], fg=t["misora_pink"], width=22, anchor="w")
+            lbl = tk.Label(r, text=label_text, font=("Segoe UI", 9, "bold"), bg=t["bg_panel"], fg=t["misora_pink"], width=24, anchor="w")
             lbl.pack(side="left")
+            if browse_cmd:
+                btn_b = ttk.Button(r, text=browse_text, style="Small.TButton", command=browse_cmd)
+                btn_b.pack(side="right", padx=(4, 0))
+            if open_cmd:
+                btn_o = ttk.Button(r, text="Open", style="Small.TButton", command=open_cmd)
+                btn_o.pack(side="right", padx=(4, 0))
             ent = tk.Entry(r, font=("Segoe UI", 9), bg=t["bg_editor"], fg=fg_editor, bd=1, relief="solid")
             ent.pack(side="left", fill="x", expand=True, padx=4)
             return r, ent
 
         # 1. Backup Folder
-        r1, ent_backup = make_row(content, "Backup Folder:")
-        cur_bak = str(self.backup_folder) if self.backup_folder else str(SCRIPT_DIR / "backups")
-        ent_backup.insert(0, cur_bak)
-        var_use_default_bak = tk.BooleanVar(master=dlg, value=(self.backup_folder is None))
-
         def _browse_bak():
             d = filedialog.askdirectory(title="Select Backup Folder")
             if d:
@@ -6967,70 +7102,107 @@ class MisoraApp(tk.Tk):
                 ent_backup.insert(0, d)
                 var_use_default_bak.set(False)
 
-        ttk.Button(r1, text="Browse...", style="Small.TButton", command=_browse_bak).pack(side="left", padx=2)
-        cb_bak = tk.Checkbutton(content, text="Use default backups folder (SCRIPT_DIR/backups)", variable=var_use_default_bak, bg=t["bg_panel"], fg=fg_panel, selectcolor=t["bg_dark"])
-        cb_bak.pack(anchor="w", padx=(160, 0), pady=(0, 6))
+        def _open_bak_folder():
+            b = ent_backup.get().strip() or str(SCRIPT_DIR / "backups")
+            p = Path(b)
+            p.mkdir(parents=True, exist_ok=True)
+            subprocess.Popen(["explorer.exe", str(p)])
+
+        r1, ent_backup = make_row(content, "Backup Folder:", browse_cmd=_browse_bak, open_cmd=_open_bak_folder)
+        cur_bak = str(self.backup_folder) if self.backup_folder else str(SCRIPT_DIR / "backups")
+        ent_backup.insert(0, cur_bak)
+        var_use_default_bak = tk.BooleanVar(master=dlg, value=(self.backup_folder is None))
+
+        cb_bak = tk.Checkbutton(
+            content,
+            text="Use default backups folder (SCRIPT_DIR/backups)",
+            variable=var_use_default_bak,
+            bg=t["bg_panel"],
+            fg=fg_panel,
+            selectcolor=t["bg_dark"],
+            activebackground=t["bg_panel"],
+            activeforeground=fg_panel,
+        )
+        cb_bak.pack(anchor="w", padx=(170, 0), pady=(0, 6))
 
         # 2. BepInEx Project Folder
-        r2, ent_bepinex = make_row(content, "BepInEx Project Folder:")
-        if self.bepinex_project_folder:
-            ent_bepinex.insert(0, str(self.bepinex_project_folder))
-
         def _browse_bepinex():
             d = filedialog.askdirectory(title="Select BepInEx Translation Folder")
             if d:
                 ent_bepinex.delete(0, tk.END)
                 ent_bepinex.insert(0, d)
 
-        ttk.Button(r2, text="Browse...", style="Small.TButton", command=_browse_bepinex).pack(side="left", padx=2)
+        def _open_bep_folder():
+            b = ent_bepinex.get().strip()
+            if b and Path(b).exists():
+                subprocess.Popen(["explorer.exe", str(b)])
+            else:
+                messagebox.showinfo("BepInEx Folder", "Folder does not exist.")
 
-        # 3. Datamine Executable
-        r3, ent_datamine = make_row(content, "Datamine Tool:")
-        if self.datamine_exe:
-            ent_datamine.insert(0, str(self.datamine_exe))
+        r2, ent_bepinex = make_row(content, "BepInEx Project Folder:", browse_cmd=_browse_bepinex, open_cmd=_open_bep_folder)
+        if self.bepinex_project_folder:
+            ent_bepinex.insert(0, str(self.bepinex_project_folder))
 
+        # 3. Universal Datamine Tool
         def _browse_datamine():
-            f = filedialog.askopenfilename(title="Select Datamine Executable", filetypes=[("Executables & Scripts", "*.exe;*.py;*.bat;*.cmd"), ("All Files", "*.*")])
+            f = filedialog.askopenfilename(
+                title="Select Datamine Tool",
+                filetypes=[("Executables & Scripts", "*.exe;*.py;*.bat;*.cmd"), ("All Files", "*.*")]
+            )
             if f:
                 ent_datamine.delete(0, tk.END)
                 ent_datamine.insert(0, f)
 
-        ttk.Button(r3, text="Browse...", style="Small.TButton", command=_browse_datamine).pack(side="left", padx=2)
+        r3, ent_datamine = make_row(content, "Datamine Tool:", browse_cmd=_browse_datamine)
+        if self.datamine_exe:
+            ent_datamine.insert(0, str(self.datamine_exe))
 
-        # 4. External Editor
-        r4, ent_editor = make_row(content, "External Text Editor:")
-        if self.external_editor_path:
-            ent_editor.insert(0, str(self.external_editor_path))
+        # 4. Notepad++ Path
+        def _browse_npp():
+            f = filedialog.askopenfilename(
+                title="Select Notepad++ Executable",
+                filetypes=[("Executables", "*.exe"), ("All Files", "*.*")]
+            )
+            if f:
+                ent_npp.delete(0, tk.END)
+                ent_npp.insert(0, f)
 
+        r4, ent_npp = make_row(content, "Notepad++ Executable:", browse_cmd=_browse_npp)
+        if self.notepadpp_path:
+            ent_npp.insert(0, str(self.notepadpp_path))
+
+        # 5. External Text Editor
         def _browse_editor():
-            f = filedialog.askopenfilename(title="Select External Editor", filetypes=[("Executables", "*.exe;*.bat;*.cmd"), ("All Files", "*.*")])
+            f = filedialog.askopenfilename(
+                title="Select External Text Editor",
+                filetypes=[("Executables & Scripts", "*.exe;*.bat;*.cmd"), ("All Files", "*.*")]
+            )
             if f:
                 ent_editor.delete(0, tk.END)
                 ent_editor.insert(0, f)
 
-        ttk.Button(r4, text="Browse...", style="Small.TButton", command=_browse_editor).pack(side="left", padx=2)
+        r5, ent_editor = make_row(content, "External Text Editor:", browse_cmd=_browse_editor)
+        if self.external_editor_path:
+            ent_editor.insert(0, str(self.external_editor_path))
 
         # Separator & File references
         ttk.Separator(content, orient="horizontal").pack(fill="x", pady=10)
 
-        # 5. Config File
-        r5 = tk.Frame(content, bg=t["bg_panel"])
-        r5.pack(fill="x", pady=2)
-        tk.Label(r5, text="Config File:", font=("Segoe UI", 9, "bold"), bg=t["bg_panel"], fg=t["fg_muted"], width=22, anchor="w").pack(side="left")
-        tk.Label(r5, text=str(CONFIG_PATH), font=("Consolas", 8), bg=t["bg_panel"], fg=fg_panel, anchor="w").pack(side="left", fill="x", expand=True)
-        ttk.Button(r5, text="Reveal", style="Small.TButton", command=lambda: subprocess.Popen(["explorer.exe", f"/select,{CONFIG_PATH}"])).pack(side="right", padx=2)
+        # 6. Config File
+        r_cfg = tk.Frame(content, bg=t["bg_panel"])
+        r_cfg.pack(fill="x", pady=2)
+        tk.Label(r_cfg, text="Config File:", font=("Segoe UI", 9, "bold"), bg=t["bg_panel"], fg=t["fg_muted"], width=24, anchor="w").pack(side="left")
+        ttk.Button(r_cfg, text="Reveal", style="Small.TButton", command=lambda: subprocess.Popen(["explorer.exe", f"/select,{CONFIG_PATH}"])).pack(side="right", padx=(4, 0))
+        tk.Label(r_cfg, text=str(CONFIG_PATH), font=("Consolas", 8), bg=t["bg_panel"], fg=fg_panel, anchor="w").pack(side="left", fill="x", expand=True)
 
-        # 6. Debug Log
-        r6 = tk.Frame(content, bg=t["bg_panel"])
-        r6.pack(fill="x", pady=2)
-        tk.Label(r6, text="Debug Log:", font=("Segoe UI", 9, "bold"), bg=t["bg_panel"], fg=t["fg_muted"], width=22, anchor="w").pack(side="left")
-        tk.Label(r6, text=str(DEBUG_LOG_PATH), font=("Consolas", 8), bg=t["bg_panel"], fg=fg_panel, anchor="w").pack(side="left", fill="x", expand=True)
-        ttk.Button(r6, text="Open", style="Small.TButton", command=self._on_open_debug_log_file).pack(side="right", padx=2)
+        # 7. Debug Log
+        r_log = tk.Frame(content, bg=t["bg_panel"])
+        r_log.pack(fill="x", pady=2)
+        tk.Label(r_log, text="Debug Log:", font=("Segoe UI", 9, "bold"), bg=t["bg_panel"], fg=t["fg_muted"], width=24, anchor="w").pack(side="left")
+        ttk.Button(r_log, text="Open", style="Small.TButton", command=self._on_open_debug_log_file).pack(side="right", padx=(4, 0))
+        tk.Label(r_log, text=str(DEBUG_LOG_PATH), font=("Consolas", 8), bg=t["bg_panel"], fg=fg_panel, anchor="w").pack(side="left", fill="x", expand=True)
 
         # Buttons at bottom
-        btn_bar = tk.Frame(dlg, bg=t["bg_panel"], padx=16, pady=12)
-        btn_bar.pack(fill="x", side="bottom")
-
         def _save_and_close():
             if var_use_default_bak.get():
                 self.backup_folder = None
@@ -7045,15 +7217,21 @@ class MisoraApp(tk.Tk):
                 root = text_dir if text_dir.exists() else self.bepinex_project_folder
                 if root not in self.xuat_search_roots:
                     self.xuat_search_roots.insert(0, root)
+                if self.scope_var.get() == "project":
+                    self.folder_path_var.set(str(self.bepinex_project_folder))
 
             dm_val = ent_datamine.get().strip()
             self.datamine_exe = Path(dm_val) if dm_val else None
+
+            npp_val = ent_npp.get().strip()
+            self.notepadpp_path = Path(npp_val) if npp_val else None
 
             ed_val = ent_editor.get().strip()
             self.external_editor_path = Path(ed_val) if ed_val else None
 
             self._save_user_prefs()
             self.lbl_status.config(text="Updated paths and backup configuration.")
+            self.show_toast("Paths and backup settings saved successfully!")
             dlg.destroy()
 
         ttk.Button(btn_bar, text="Cancel", style="TButton", command=dlg.destroy).pack(side="right", padx=4)
