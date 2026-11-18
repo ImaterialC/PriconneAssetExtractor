@@ -37,6 +37,7 @@ if str(SCRIPT_DIR.parent) not in sys.path:
 
 try:
     from misora.assets.icon import THEME, apply_window_icon
+    from misora.assets.splash import MisoraSplashScreen
     from misora.core import (
         ALWAYS_ON_CATEGORY, LOG_CATEGORIES, LOG_LEVELS, Box, BundleIOError,
         BoxEditDelta, BulkFileDelta, LogEntry, MasterUndoJournal, MisoraLogger,
@@ -47,6 +48,7 @@ try:
     )
 except ImportError:
     from assets.icon import THEME, apply_window_icon
+    from assets.splash import MisoraSplashScreen
     from core import (
         ALWAYS_ON_CATEGORY, LOG_CATEGORIES, LOG_LEVELS, Box, BundleIOError,
         BoxEditDelta, BulkFileDelta, LogEntry, MasterUndoJournal, MisoraLogger,
@@ -872,11 +874,19 @@ class NguiColorPickerPopup(tk.Toplevel):
 class MisoraApp(tk.Tk):
     """Main Application Window for Misora: Unity3D Revision Tool."""
 
-    def __init__(self, initial_path: Optional[str] = None):
+    def __init__(self, initial_path: Optional[str] = None, _progress_callback=None):
         super().__init__()
         self.title("Misora: Unity3D Revision Tool & Story Editor")
         self.geometry("1280x820")
         self.minsize(980, 620)
+        self.withdraw()   # stay hidden until splash closes
+
+        def _rpt(val: float, msg: str = ""):
+            if _progress_callback:
+                try:
+                    _progress_callback(val, msg)
+                except Exception:
+                    pass
 
         # Central Logger initialized early so startup & config load are recorded
         self.logger = MisoraLogger(DEBUG_LOG_PATH)
@@ -897,6 +907,7 @@ class MisoraApp(tk.Tk):
         self._translator_dialog: Optional[Any] = None
         self._side_drawer_pinned: bool = False
 
+        _rpt(0.25, "Loading saved preferences…")
         # Load persistent user preferences (fonts, theme colors, paths, mtl settings)
         self.prefs: Dict[str, Any] = self._load_user_prefs()
         self.theme: Dict[str, str] = dict(self.prefs["theme"])
@@ -982,15 +993,19 @@ class MisoraApp(tk.Tk):
         # Auto-detect project paths
         self._detect_environment()
 
+        _rpt(0.55, "Building UI layout…")
         # Build UI
         self._apply_styles()
         self._build_menu()
         self._build_search_bar()
+
+        _rpt(0.70, "Initializing editor panels…")
         self._build_main_panels()
         self._build_side_drawer()
         self._build_status_bar()
         self._bind_shortcuts()
 
+        _rpt(0.85, "Applying theme and fonts…")
         # Sync initial widget fonts & colors with saved preferences
         self._apply_theme_and_fonts_live(save=False)
 
@@ -998,13 +1013,18 @@ class MisoraApp(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self._on_app_exit)
         self.bind("<Destroy>", self._on_root_destroy)
 
+        _rpt(0.95, "Enabling drag & drop…")
         # Enable native OS Drag & Drop safely on the outer frame HWND
         self._init_drag_and_drop()
 
         # Start periodic poll for background tasks
         self.after(100, self._process_search_queue)
 
+        _rpt(1.00, "Ready!")
         self.logger.info("UI / Theme / Config", f"Misora initialized. Config path: {CONFIG_PATH}")
+
+        # Reveal the main window (was hidden during splash)
+        self.deiconify()
 
         if initial_path and os.path.exists(initial_path):
             self.open_file(initial_path)
@@ -6728,6 +6748,17 @@ class MisoraApp(tk.Tk):
             self.logger.exception("Failed to register .unity3d association:", exc)
             messagebox.showerror("Registration Failed", f"Could not write registry keys:\n{exc}")
 
+    def on_about(self) -> None:
+        """Show application information dialog."""
+        about_text = (
+            "Misora: Unity3D Revision Tool & Story Editor\n"
+            "Version 1.3.0\n\n"
+            "A specialized GUI text editor for Princess Connect! Re:Dive\n"
+            "Unity3D story bundles (.unity3d) and XUAT translation files.\n\n"
+            "MIT License — Created for the Priconne Modding Community."
+        )
+        messagebox.showinfo("About Misora", about_text)
+
 
 # =============================================================================
 # Translator Suite Dialogs (#4A, #16, #17)
@@ -7513,21 +7544,50 @@ class BatchTranslateDialog(tk.Toplevel):
         threading.Thread(target=worker, daemon=True).start()
 
 
-
-
-    def on_about(self) -> None:
-        about_text = (
-            "Misora: Unity3D Revision Tool & Story Editor\n"
-            "Version 1.2.0\n\n"
-            "A specialized text editor for Princess Connect! Re:Dive.\n\n"
-            "MIT License - Created for the Priconne Modding Community."
-        )
-        messagebox.showinfo("About Misora", about_text)
-
-
 def main():
+    """
+    Application entry point.
+
+    Shows a splash screen with artwork and an animated progress bar while
+    the main MisoraApp window initializes. The splash fades out as soon as
+    the editor is ready, so there is never a frozen black window on startup.
+    """
     initial_file = sys.argv[1] if len(sys.argv) > 1 else None
-    app = MisoraApp(initial_file)
+
+    # -- Show splash -------------------------------------------------------
+    _STEPS = [
+        (0.10, "Loading core modules…"),
+        (0.25, "Preparing theme engine…"),
+        (0.40, "Initializing undo journal…"),
+        (0.55, "Building UI layout…"),
+        (0.70, "Applying window styles…"),
+        (0.85, "Finalizing editor state…"),
+        (1.00, "Ready!"),
+    ]
+
+    try:
+        splash = MisoraSplashScreen()
+    except Exception:
+        # If splash fails (e.g. no display, no image), fall back silently
+        splash = None
+
+    def _report(progress: float, msg: str):
+        if splash:
+            splash.set_progress(progress, msg)
+            splash.process_events()
+
+    # -- Build the main window with splash progress updates ---------------
+    _report(0.10, "Loading core modules…")
+    _report(0.25, "Preparing theme engine…")
+    _report(0.40, "Initializing undo journal…")
+
+    app = MisoraApp(initial_file, _progress_callback=_report)
+
+    _report(1.00, "Ready!")
+
+    if splash:
+        splash.close()
+
     app.mainloop()
 
 
