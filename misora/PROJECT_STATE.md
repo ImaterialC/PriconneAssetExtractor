@@ -1,12 +1,12 @@
 # MISORA — PROJECT STATE
-*Last updated: 2026-11-18 — User verified misora.bat launch; user reported Bug 1 & 12 details; ready for fixes*
+*Last updated: 2026-11-18 — Bug #12 (NGUI Color Window) and Bug #3 (Continuous Ctrl+Z/Y Undo) fixed*
 
 ---
 
 ## SESSION HANDOFF / RESUME INSTRUCTIONS
-**Current step:** App launches successfully. Diagnosed Bug #12 (Color picker window canvasses blank + truncated layout) and Bug #1 (DnD folder/prompt/filtering improvements).  
-**Next action:** Apply fix for Bug #12 (NGUI Color Picker popup Pillow/geometry fix) or P0-1 (Ctrl+Z/Y unblock).  
-Awaiting user confirmation to apply Bug #12 fix.
+**Current step:** Bug #12 (Color picker window Pillow render + DPI-safe eyedropper + geometry fix) and Bug #3 (P0-1: Ctrl+Z / Ctrl+Y Continuous key guard unblock) applied and tested. Unit tests 11/11 passing.  
+**Next action:** Apply DnD improvements (Bug #1: folder multi-file confirmation prompt, large-file safety warning, binary non-text file filter).  
+Awaiting user confirmation to apply DnD improvements.
 
 ---
 
@@ -16,6 +16,7 @@ Awaiting user confirmation to apply Bug #12 fix.
   - `bcc57c6`: Initial takeover `PROJECT_STATE.md` audit.
   - `db599f9`: Fixed `misora.bat` invocation bug.
   - `d96da3d`: Updated `misora.bat` to auto-detect Python 3.12 where UnityPy is installed (resolves Python 3.15 default conflict).
+  - `fc2c6ba`: Fixed Bug #12 (Color Picker Pillow & Eyedropper) and Bug #3 (Continuous Ctrl+Z/Y undo).
 - **Old session backups preserved:** `misora.py.bak_20261118_142038`, `misora.py.bak2_20261118_142158`.
 
 ---
@@ -214,7 +215,7 @@ Bug #6: Buttons use `width=10` fixed. Spec says max = natural width of "Sub"/"Su
 |---|-----|--------|
 | 1 | DnD crashes (ctypes WM_DROPFILES) | FIXED & VERIFIED by user: Multi-file works; needs folder multi-file prompt & non-text format guard |
 | 2 | Config persists only fonts/theme | PARTIAL — paths persist; some toggles missing (geometry, Continuous/Preview, sync-XUAT) |
-| 3 | Undo/Redo absent; Ctrl+Z/Y blocked | PARTIAL — Undo wired but **BLOCKED** in Continuous (line 4901-4902) |
+| 3 | Undo/Redo absent; Ctrl+Z/Y blocked | DONE — Ctrl+Z (undo) and Ctrl+Y / Ctrl+Shift+Z (redo) unblocked in Continuous key guard |
 | 4 | Theme misses some windows | UNVERIFIED — needs live test |
 | 5 | Button labels unreadable on accents | DONE — wcag_relative_luminance + best_contrast_fg implemented |
 | 6 | Ribbon buttons too wide | PARTIAL — all width=10; spec wants variable widths |
@@ -223,7 +224,7 @@ Bug #6: Buttons use `width=10` fixed. Spec says max = natural width of "Sub"/"Su
 | 9 | Continuous→Page lands wrong box | UNVERIFIED — needs live test |
 | 10 | Up arrow doesn't cross to prev box | DONE in code — lines 4867-4879 + 5291-5298 |
 | 11 | Delete blocked on multi-box selection | PARTIAL — on_clear_dialogue_skeleton exists; spec details unverified |
-| 12 | Eyedropper & Color window broken | CONFIRMED by user screenshot — PhotoImage put failure, truncated window, DPI issue |
+| 12 | Eyedropper & Color window broken | DONE — Swapped to Pillow ImageTk.PhotoImage + DPI-aware ImageGrab, fixed window geometry (394x310) |
 | 13 | NGUI_TOKEN_RE corrupted | NOT PRESENT — compiles clean |
 | 14 | Gradient separator comma vs hyphen | DECIDED: Ribbon inserts comma `[RRGGBB,RRGGBB]`; parser accepts both `[-,]` |
 | 15 | Plain .txt save "Nothing to Save" | LIKELY FIXED — code path exists; needs live test |
