@@ -152,6 +152,68 @@ class TestMisoraUIIntegration(unittest.TestCase):
         self.assertEqual(self.app.folder_path_var.get(), str(folder_a))
         self.assertEqual(self.app.folder_path_entry.cget("state"), "normal")
 
+    def test_06_process_opened_folder_empty(self):
+        """Opening a folder with no story files sets search scope without opening files."""
+        empty_folder = self.tmp_dir / "EmptyFolder"
+        empty_folder.mkdir(parents=True, exist_ok=True)
+
+        self.app._process_opened_folder(empty_folder, source_label="Test")
+        self.assertEqual(self.app.scope_var.get(), "folder")
+        self.assertEqual(self.app.selected_search_folder, empty_folder)
+        self.assertEqual(self.app.folder_path_var.get(), str(empty_folder))
+
+    def test_07_process_opened_folder_single_file(self):
+        """Opening a folder with exactly 1 story file opens it and sets scope to current."""
+        one_folder = self.tmp_dir / "OneStoryFolder"
+        one_folder.mkdir(parents=True, exist_ok=True)
+        txt_file = one_folder / "test_story.txt"
+        txt_file.write_text("Test line=Translated\n", encoding="utf-8")
+
+        self.app._process_opened_folder(one_folder, source_label="Test")
+        self.assertEqual(self.app.scope_var.get(), "current")
+        self.assertEqual(self.app.current_file_path, txt_file)
+
+    def test_08_line_numbers_and_ruler_toggles(self):
+        """Line numbers gutter and horizontal column ruler toggle visibility correctly."""
+        # Toggle line numbers OFF
+        self.app.var_show_line_numbers.set(False)
+        self.app._on_toggle_line_numbers()
+        self.assertFalse(self.app.show_line_numbers)
+        self.assertFalse(self.app._is_widget_packed(self.app.gutter_clean))
+
+        # Toggle line numbers ON
+        self.app.var_show_line_numbers.set(True)
+        self.app._on_toggle_line_numbers()
+        self.assertTrue(self.app.show_line_numbers)
+        self.assertTrue(self.app._is_widget_packed(self.app.gutter_clean))
+
+        # Toggle column ruler OFF
+        self.app.var_show_column_ruler.set(False)
+        self.app._on_toggle_column_ruler()
+        self.assertFalse(self.app.show_column_ruler)
+        self.assertFalse(self.app._is_widget_packed(self.app.ruler_clean))
+
+        # Toggle column ruler ON
+        self.app.var_show_column_ruler.set(True)
+        self.app._on_toggle_column_ruler()
+        self.assertTrue(self.app.show_column_ruler)
+        self.assertTrue(self.app._is_widget_packed(self.app.ruler_clean))
+
+    def test_09_undo_redo_shortcuts_and_dialogue_binding(self):
+        """Ctrl+Z and Ctrl+Y are intercepted by _shortcut_undo and _shortcut_redo on dialogue."""
+        res_undo = self.app._shortcut_undo()
+        self.assertEqual(res_undo, "break")
+        res_redo = self.app._shortcut_redo()
+        self.assertEqual(res_redo, "break")
+
+    def test_10_theme_swatches_and_commit_hex(self):
+        """Theme swatches and hex entries reflect updated color on commit."""
+        test_color = "#334455"
+        self.app._theme_hex_vars["bg_dark"].set(test_color)
+        self.app._commit_theme_hex("bg_dark")
+        self.assertEqual(self.app.theme["bg_dark"], test_color)
+        self.assertEqual(self.app._theme_swatch_buttons["bg_dark"].cget("bg"), test_color)
+
 
 if __name__ == "__main__":
     unittest.main()

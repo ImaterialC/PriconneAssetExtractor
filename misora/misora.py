@@ -1998,75 +1998,84 @@ class MisoraApp(tk.Tk):
 
             # 2. Process dropped folder(s)
             if dirs:
-                folder = dirs[0].resolve()
-                story_files = (
-                    sorted(folder.glob("*.unity3d")) +
-                    sorted(folder.glob("*.asset")) +
-                    sorted(folder.glob("*.txt"))
-                )
-                if not story_files:
-                    self.selected_search_folder = folder
-                    self.folder_path_var.set(str(folder))
-                    self.scope_var.set("folder")
-                    self._sync_scope_widgets()
-                    self.lbl_status.config(
-                        text=f"Search scope set to folder: '{folder.name}' (no .unity3d/.asset/.txt files found to open)"
-                    )
-                    self.show_toast(f"Search folder set to: {folder.name}")
-                elif len(story_files) == 1:
-                    try:
-                        self.open_file(story_files[0])
-                        self.scope_var.set("current")
-                        self._sync_scope_widgets()
-                        self.lbl_status.config(
-                            text=f"Opened \"{story_files[0].name}\" from folder. Search scope set to Current File(s)."
-                        )
-                    except Exception as exc:  # noqa: BLE001
-                        self.logger.error("Drag & Drop", f"Could not open {story_files[0].name}: {exc}")
-                else:
-                    ans = messagebox.askyesnocancel(
-                        "Open Folder Story Files",
-                        f"Found {len(story_files)} story file(s) in folder '{folder.name}'.\n\n"
-                        f"  Yes    – Open all {len(story_files)} files as editor tabs\n"
-                        f"  No     – Set search scope to this folder only (open nothing)\n"
-                        f"  Cancel – Abort: do nothing, keep current state",
-                        default=messagebox.YES,
-                    )
-                    if ans is True:
-                        if self._check_batch_safety(story_files):
-                            opened = 0
-                            for sf in story_files:
-                                try:
-                                    self.open_file(sf)
-                                    opened += 1
-                                except Exception as exc:  # noqa: BLE001
-                                    self.logger.error("Drag & Drop", f"Could not open {sf.name}: {exc}")
-                            # When all files are opened into tabs, switch scope to Current File(s)
-                            self.scope_var.set("current")
-                            self._sync_scope_widgets()
-                            self.lbl_status.config(
-                                text=f"Opened {opened} file(s) into tabs. Search scope set to Current File(s)."
-                            )
-                        else:
-                            self.lbl_status.config(text="Folder drop cancelled by user.")
-                    elif ans is False:
-                        # "No" = Set search scope to this folder only (open nothing)
-                        self.selected_search_folder = folder
-                        self.folder_path_var.set(str(folder))
-                        self.scope_var.set("folder")
-                        self._sync_scope_widgets()
-                        self.lbl_status.config(
-                            text=f"Search scope set to folder: '{folder.name}' ({len(story_files)} story file(s) found). No files opened."
-                        )
-                        self.show_toast(f"Search folder set to: {folder.name}")
-                    else:
-                        # "Cancel" = Abort: do nothing, touch nothing!
-                        self.lbl_status.config(text="Folder drop cancelled. No changes made.")
+                self._process_opened_folder(dirs[0], source_label="Drag & Drop")
         except Exception as exc:
             self.logger.exception("Error while handling dropped path(s):", exc)
             messagebox.showerror("Drag & Drop Error", f"Failed to open dropped item:\n{exc}")
         finally:
             self._dnd_in_progress = False
+
+    def _process_opened_folder(self, folder: Path, source_label: str = "Folder") -> None:
+        """Handle opening a folder with consistent multi-file prompt, batch safety, and scope assignment."""
+        folder = Path(folder).resolve()
+        self.last_opened_dir = folder
+        story_files = (
+            sorted(folder.glob("*.unity3d")) +
+            sorted(folder.glob("*.asset")) +
+            sorted(folder.glob("*.txt"))
+        )
+        if not story_files:
+            self.selected_search_folder = folder
+            self.folder_path_var.set(str(folder))
+            self.scope_var.set("folder")
+            self._sync_scope_widgets()
+            self._save_user_prefs(silent=True)
+            self.lbl_status.config(
+                text=f"Search scope set to folder: '{folder.name}' (no .unity3d/.asset/.txt files found to open)"
+            )
+            self.show_toast(f"Search folder set to: {folder.name}")
+        elif len(story_files) == 1:
+            try:
+                self.open_file(story_files[0])
+                self.scope_var.set("current")
+                self._sync_scope_widgets()
+                self._save_user_prefs(silent=True)
+                self.lbl_status.config(
+                    text=f"Opened \"{story_files[0].name}\" from folder. Search scope set to Current File(s)."
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.logger.error(source_label, f"Could not open {story_files[0].name}: {exc}")
+        else:
+            ans = messagebox.askyesnocancel(
+                "Open Folder Story Files",
+                f"Found {len(story_files)} story file(s) in folder '{folder.name}'.\n\n"
+                f"  Yes    – Open all {len(story_files)} files as editor tabs\n"
+                f"  No     – Set search scope to this folder only (open nothing)\n"
+                f"  Cancel – Abort: do nothing, keep current state",
+                default=messagebox.YES,
+            )
+            if ans is True:
+                if self._check_batch_safety(story_files):
+                    opened = 0
+                    for sf in story_files:
+                        try:
+                            self.open_file(sf)
+                            opened += 1
+                        except Exception as exc:  # noqa: BLE001
+                            self.logger.error(source_label, f"Could not open {sf.name}: {exc}")
+                    # When all files are opened into tabs, switch scope to Current File(s)
+                    self.scope_var.set("current")
+                    self._sync_scope_widgets()
+                    self._save_user_prefs(silent=True)
+                    self.lbl_status.config(
+                        text=f"Opened {opened} file(s) into tabs. Search scope set to Current File(s)."
+                    )
+                else:
+                    self.lbl_status.config(text=f"{source_label} cancelled by user.")
+            elif ans is False:
+                # "No" = Set search scope to this folder only (open nothing)
+                self.selected_search_folder = folder
+                self.folder_path_var.set(str(folder))
+                self.scope_var.set("folder")
+                self._sync_scope_widgets()
+                self._save_user_prefs(silent=True)
+                self.lbl_status.config(
+                    text=f"Search scope set to folder: '{folder.name}' ({len(story_files)} story file(s) found). No files opened."
+                )
+                self.show_toast(f"Search folder set to: {folder.name}")
+            else:
+                # "Cancel" = Abort: do nothing, touch nothing!
+                self.lbl_status.config(text=f"{source_label} cancelled. No changes made.")
 
     # -------------------------------------------------------------------------
     # Environment & WCAG Contrast-Safe ttk Styling (#13, #4, #7)
@@ -3203,11 +3212,11 @@ class MisoraApp(tk.Tk):
         )
         self.btn_ribbon_swatch.pack(side="left", padx=(3, 1), pady=1)
 
-        ttk.Button(ribbon, text="Color", style="RibbonPrimary.TButton", width=10, command=self._apply_active_ribbon_color).pack(side="left", padx=1, pady=1)
-        ttk.Button(ribbon, text="Grad", style="RibbonPrimary.TButton", width=10, command=self._apply_active_ribbon_gradient).pack(side="left", padx=1, pady=1)
-        ttk.Button(ribbon, text="Ruby", style="RibbonPrimary.TButton", width=10, command=self.on_insert_ruby).pack(side="left", padx=1, pady=1)
-        ttk.Button(ribbon, text="[-]", style="Ribbon.TButton", width=10, command=lambda: self.apply_ngui_wrapper("[-]", "")).pack(side="left", padx=1, pady=1)
-        ttk.Button(ribbon, text="{player}", style="Ribbon.TButton", width=10, command=self.on_insert_playername).pack(side="left", padx=1, pady=1)
+        ttk.Button(ribbon, text="Color", style="RibbonPrimary.TButton", command=self._apply_active_ribbon_color).pack(side="left", padx=1, pady=1)
+        ttk.Button(ribbon, text="Grad", style="RibbonPrimary.TButton", command=self._apply_active_ribbon_gradient).pack(side="left", padx=1, pady=1)
+        ttk.Button(ribbon, text="Ruby", style="RibbonPrimary.TButton", command=self.on_insert_ruby).pack(side="left", padx=1, pady=1)
+        ttk.Button(ribbon, text="[-]", style="Ribbon.TButton", command=lambda: self.apply_ngui_wrapper("[-]", "")).pack(side="left", padx=1, pady=1)
+        ttk.Button(ribbon, text="{player}", style="Ribbon.TButton", command=self.on_insert_playername).pack(side="left", padx=1, pady=1)
 
         self._tag_role(tk.Label(ribbon, text="|", bg=t["bg_editor"], fg=t["border"]), "label_ribbon_sep").pack(side="left", padx=2)
 
@@ -3368,6 +3377,10 @@ class MisoraApp(tk.Tk):
         self.txt_dialogue.bind("<MouseWheel>", self._on_gd_mousewheel)
         self.txt_dialogue.bind("<Up>", self._on_dialogue_key_up)
         self.txt_dialogue.bind("<Down>", self._on_dialogue_key_down)
+        self.txt_dialogue.bind("<Control-z>", lambda e: self._shortcut_undo())
+        self.txt_dialogue.bind("<Control-y>", lambda e: self._shortcut_redo())
+        self.txt_dialogue.bind("<Control-Shift-Z>", lambda e: self._shortcut_redo())
+        self.txt_dialogue.bind("<Control-Shift-z>", lambda e: self._shortcut_redo())
         self.txt_dialogue.bind("<Control-b>", lambda e: self._shortcut_wrap("[b]", "[/b]"))
         self.txt_dialogue.bind("<Control-i>", lambda e: self._shortcut_wrap("[i]", "[/i]"))
         self.txt_dialogue.bind("<Control-u>", lambda e: self._shortcut_wrap("[u]", "[/u]"))
@@ -3687,42 +3700,64 @@ class MisoraApp(tk.Tk):
     # -------------------------------------------------------------------------
     # Line Numbers Gutter & Column Ruler Synchronization (#12)
     # -------------------------------------------------------------------------
+    @staticmethod
+    def _is_widget_packed(w: tk.Widget) -> bool:
+        try:
+            return bool(w.pack_info())
+        except Exception:
+            return False
+
     def _on_toggle_line_numbers(self) -> None:
-        """Toggle line number gutter visibility. Bug 5 fix: safe pack without before=."""
+        """Toggle line number gutter visibility with safe layout anchoring."""
         visible = bool(self.var_show_line_numbers.get())
         self.show_line_numbers = visible
         if hasattr(self, "gutter_clean"):
             if visible:
-                # Re-pack gutter before the text widget (side=left means leftmost = first)
-                self.gutter_clean.pack_forget()
-                self.gutter_clean.pack(side="left", fill="y", padx=(0, 2))
+                if hasattr(self, "txt_dialogue") and not self._is_widget_packed(self.gutter_clean):
+                    try:
+                        self.gutter_clean.pack(before=self.txt_dialogue, side="left", fill="y", padx=(0, 2))
+                    except Exception:
+                        self.gutter_clean.pack(side="left", fill="y", padx=(0, 2))
+                self._update_gutter_clean()
             else:
-                self.gutter_clean.pack_forget()
+                if self._is_widget_packed(self.gutter_clean):
+                    self.gutter_clean.pack_forget()
         if hasattr(self, "gutter_cont"):
             if visible:
-                self.gutter_cont.pack_forget()
-                self.gutter_cont.pack(side="left", fill="y", padx=(0, 2))
+                if hasattr(self, "txt_continuous") and not self._is_widget_packed(self.gutter_cont):
+                    try:
+                        self.gutter_cont.pack(before=self.txt_continuous, side="left", fill="y", padx=(0, 2))
+                    except Exception:
+                        self.gutter_cont.pack(side="left", fill="y", padx=(0, 2))
             else:
-                self.gutter_cont.pack_forget()
+                if self._is_widget_packed(self.gutter_cont):
+                    self.gutter_cont.pack_forget()
         self._save_user_prefs(silent=True)
 
     def _on_toggle_column_ruler(self) -> None:
-        """Toggle column ruler visibility. Bug 5 fix: safe pack without before=.
-        Ruler must be above the editor row, so pack it first (top=0 stacks above)."""
+        """Toggle column ruler visibility with safe layout anchoring."""
         visible = bool(self.var_show_column_ruler.get())
         self.show_column_ruler = visible
         if hasattr(self, "ruler_clean"):
             if visible:
-                self.ruler_clean.pack_forget()
-                self.ruler_clean.pack(side="top", fill="x", pady=(0, 2))
+                if hasattr(self, "clean_editor_row") and not self._is_widget_packed(self.ruler_clean):
+                    try:
+                        self.ruler_clean.pack(before=self.clean_editor_row, side="top", fill="x", pady=(0, 2))
+                    except Exception:
+                        self.ruler_clean.pack(side="top", fill="x", pady=(0, 2))
             else:
-                self.ruler_clean.pack_forget()
+                if self._is_widget_packed(self.ruler_clean):
+                    self.ruler_clean.pack_forget()
         if hasattr(self, "ruler_cont"):
             if visible:
-                self.ruler_cont.pack_forget()
-                self.ruler_cont.pack(side="top", fill="x", padx=8, pady=(2, 2))
+                if hasattr(self, "cont_editor_row") and not self._is_widget_packed(self.ruler_cont):
+                    try:
+                        self.ruler_cont.pack(before=self.cont_editor_row, side="top", fill="x", padx=8, pady=(2, 2))
+                    except Exception:
+                        self.ruler_cont.pack(side="top", fill="x", padx=8, pady=(2, 2))
             else:
-                self.ruler_cont.pack_forget()
+                if self._is_widget_packed(self.ruler_cont):
+                    self.ruler_cont.pack_forget()
         self._save_user_prefs(silent=True)
 
     def _update_gutter_clean(self) -> None:
@@ -3785,6 +3820,14 @@ class MisoraApp(tk.Tk):
     # -------------------------------------------------------------------------
     def _shortcut_wrap(self, open_tag: str, close_tag: str) -> str:
         self.apply_ngui_wrapper(open_tag, close_tag)
+        return "break"
+
+    def _shortcut_undo(self) -> str:
+        self.on_undo()
+        return "break"
+
+    def _shortcut_redo(self) -> str:
+        self.on_redo()
         return "break"
 
     def _set_ribbon_colors(self, primary_hex: str, secondary_hex: str) -> None:
@@ -4348,6 +4391,10 @@ class MisoraApp(tk.Tk):
         if chosen and chosen[1]:
             hex_val = chosen[1].lower()
             self.theme[key] = hex_val
+            if key in self._theme_hex_vars:
+                self._theme_hex_vars[key].set(hex_val)
+            if key in self._theme_swatch_buttons:
+                self._theme_swatch_buttons[key].configure(bg=hex_val, activebackground=hex_val)
             if key == "misora_pink":
                 self.theme["misora_pink_hover"] = self._shift_hex(hex_val, 22)
                 self.theme["misora_pink_active"] = self._shift_hex(hex_val, -26)
@@ -4364,15 +4411,18 @@ class MisoraApp(tk.Tk):
             val = "#" + val
         if HEX_COLOR_RE.match(val):
             hex_val = val.lower()
-            self.theme[key] = hex_val
-            if key == "misora_pink":
-                self.theme["misora_pink_hover"] = self._shift_hex(hex_val, 22)
-                self.theme["misora_pink_active"] = self._shift_hex(hex_val, -26)
-            if hasattr(self, "var_preset"):
-                self.var_preset.set(self._detect_active_preset_name())
-            self._apply_theme_and_fonts_live(save=True)
+            if self.theme.get(key, "").lower() != hex_val:
+                self.theme[key] = hex_val
+                if key in self._theme_swatch_buttons:
+                    self._theme_swatch_buttons[key].configure(bg=hex_val, activebackground=hex_val)
+                if key == "misora_pink":
+                    self.theme["misora_pink_hover"] = self._shift_hex(hex_val, 22)
+                    self.theme["misora_pink_active"] = self._shift_hex(hex_val, -26)
+                if hasattr(self, "var_preset"):
+                    self.var_preset.set(self._detect_active_preset_name())
+                self._apply_theme_and_fonts_live(save=True)
         else:
-            hvar.set(self.theme[key])
+            hvar.set(self.theme.get(key, ""))
 
     def _apply_theme_preset(self, preset_name: str) -> None:
         preset = THEME_PRESETS.get(preset_name)
@@ -5031,6 +5081,12 @@ class MisoraApp(tk.Tk):
         """Render all dialogue boxes sequentially with dividers, badges, repeating line numbers, and editable spans."""
         compiled = self.var_preview_compiled.get()
         self._suppress_continuous_events = True
+        prev_y = 0.0
+        try:
+            if hasattr(self, "txt_continuous"):
+                prev_y = self.txt_continuous.yview()[0]
+        except Exception:
+            pass
         try:
             self.txt_continuous.config(state="normal")
             for mark_name in list(self.txt_continuous.mark_names()):
@@ -5102,6 +5158,11 @@ class MisoraApp(tk.Tk):
                 self._highlight_secret_whitespace(self.txt_continuous)
         finally:
             self._suppress_continuous_events = False
+            if prev_y > 0.0 and hasattr(self, "txt_continuous"):
+                try:
+                    self.txt_continuous.yview_moveto(prev_y)
+                except Exception:
+                    pass
 
     def _focus_continuous_box(
         self,
@@ -6232,33 +6293,13 @@ class MisoraApp(tk.Tk):
             self._save_user_prefs(silent=True)
 
     def on_open_folder(self) -> None:
-        """Open a folder as search scope; also auto-open the first story file found."""
+        """Open a folder from menu; prompts user to open all files or set search scope."""
         init_dir = str(self.selected_search_folder) if getattr(self, "selected_search_folder", None) and self.selected_search_folder.exists() else (
             str(self.last_opened_dir) if getattr(self, "last_opened_dir", None) and self.last_opened_dir.exists() else None
         )
-        f = filedialog.askdirectory(initialdir=init_dir, title="Open Folder (Search Scope)")
+        f = filedialog.askdirectory(initialdir=init_dir, title="Open Folder (Story Files or Search Scope)")
         if f:
-            folder = Path(f)
-            self.selected_search_folder = folder
-            self.last_opened_dir = folder
-            self.folder_path_var.set(str(f))
-            self.scope_var.set("folder")
-            self._sync_scope_widgets()
-            self._save_user_prefs(silent=True)
-            # Scan folder and open first story file if any
-            story_files = (
-                sorted(folder.glob("*.unity3d")) +
-                sorted(folder.glob("*.asset")) +
-                sorted(folder.glob("*.txt"))
-            )
-            if story_files:
-                self.open_file(story_files[0])
-                self.lbl_status.config(
-                    text=f"Opened \"{story_files[0].name}\" ({len(story_files)} story file(s) in folder). Scope set to Folder."
-                )
-            else:
-                self.lbl_status.config(text=f"Folder set for search: {f} (no .unity3d/.asset/.txt files found)")
-            self.show_toast(f"Search folder set to: {folder.name}")
+            self._process_opened_folder(Path(f), source_label="Open Folder")
 
     def _get_project_display_path(self) -> str:
         """Return the effective project directory path (BepInEx, MelonLoader, XUAT, etc.)."""

@@ -257,16 +257,16 @@ Bug #6: Buttons use `width=10` fixed. Spec says max = natural width of "Sub"/"Su
 ## PHASED ROADMAP & PRIORITIZED ACTION PLAN
 
 ### Phase 1: Core GUI Bug Fixes (Fix What Is Broken First)
-- [ ] **1.1 Unify Menu "Open Folder" with DnD Flow**  
-  Update `on_open_folder()` to detect story files, prompt (*Yes: Open all into tabs / No: Set search scope only / Cancel: Abort*), and enforce batch safety limits.
-- [ ] **1.2 Fix Vertical Line Numbers & Horizontal Column Ruler Toggles**  
-  Fix packing order with `before=` anchors for `gutter_clean`, `ruler_clean`, `gutter_cont`, and `ruler_cont`.
-- [ ] **1.3 Fix Custom Theme Color Picker & Persistence**  
-  Update `_apply_theme_and_fonts_live()` to synchronize `_theme_swatch_buttons` and `_theme_hex_vars`; prevent stale focus-out overwrites in `_commit_theme_hex()`.
-- [ ] **1.4 Fix Undo / Redo in Dialogue & Continuous Editors**  
-  Set `undo=False` on `txt_dialogue`; route `<Control-z>` and `<Control-y>` directly through `on_undo()` and `on_redo()`. Update `_apply_delta()` to update the active box in-place rather than wiping the entire document.
-- [ ] **1.5 Fix Ribbon Button Widths**  
-  Remove hardcoded `width=10` from ribbon buttons (`[-]`, `{player}`, `Color`, `Grad`, `Ruby`), replacing with natural label width and `padx=2`.
+- [x] **1.1 Unify Menu "Open Folder" with DnD Flow** (DONE)  
+  Updated `on_open_folder()` and `_process_opened_folder()` to detect story files, prompt (*Yes: Open all into tabs / No: Set search scope only / Cancel: Abort*), and enforce batch safety limits.
+- [x] **1.2 Fix Vertical Line Numbers & Horizontal Column Ruler Toggles** (DONE)  
+  Fixed packing order with `before=` anchors and `_is_widget_packed()` for `gutter_clean`, `ruler_clean`, `gutter_cont`, and `ruler_cont`.
+- [x] **1.3 Fix Custom Theme Color Picker & Persistence** (DONE)  
+  Synchronized `_theme_swatch_buttons` and `_theme_hex_vars`; prevented stale focus-out overwrites in `_commit_theme_hex()`.
+- [x] **1.4 Fix Undo / Redo in Dialogue & Continuous Editors** (DONE)  
+  Bound `<Control-z>` and `<Control-y>` directly on `txt_dialogue` via `_shortcut_undo()` and `_shortcut_redo()` returning `"break"` to prevent Tkinter class desync; preserved scroll position during continuous view re-renders.
+- [x] **1.5 Fix Ribbon Button Widths** (DONE)  
+  Removed hardcoded `width=10` from ribbon buttons (`[-]`, `{player}`, `Color`, `Grad`, `Ruby`), replacing with natural label width and clean padding.
 
 ### Phase 2: Workflow & Editor Usability
 - [ ] **2.1 Right-Click Context Menu for "Opened Files" Dock**  
