@@ -1319,6 +1319,14 @@ class MisoraApp(tk.Tk):
                 walk(child)
 
         walk(self)
+        # Also re-theme any currently-open child Toplevel windows
+        for child_win in self.winfo_children():
+            if isinstance(child_win, tk.Toplevel) and child_win.winfo_exists():
+                try:
+                    child_win.configure(bg=t["bg_panel"])
+                except Exception:
+                    pass
+                walk(child_win)
 
         self.txt_results.configure(
             bg=t["bg_editor"],
@@ -2764,24 +2772,23 @@ class MisoraApp(tk.Tk):
         ttk.Button(ribbon, text="Grad", style="RibbonPrimary.TButton", width=4, command=self._apply_active_ribbon_gradient).pack(side="left", padx=1, pady=1)
         ttk.Button(ribbon, text="Ruby", style="RibbonPrimary.TButton", width=4, command=self.on_insert_ruby).pack(side="left", padx=1, pady=1)
         ttk.Button(ribbon, text="[-]", style="Ribbon.TButton", width=2, command=lambda: self.apply_ngui_wrapper("[-]", "")).pack(side="left", padx=1, pady=1)
-        ttk.Button(ribbon, text="{player}", style="Ribbon.TButton", width=6, command=self.on_insert_playername).pack(side="left", padx=1, pady=1)
+        ttk.Button(ribbon, text="{player}", style="Ribbon.TButton", command=self.on_insert_playername).pack(side="left", padx=1, pady=1)
 
         self._tag_role(tk.Label(ribbon, text="|", bg=t["bg_editor"], fg=t["border"]), "label_ribbon_sep").pack(side="left", padx=2)
 
         mini_style_buttons = [
-            ("B", "[b]", "[/b]", 1),
-            ("I", "[i]", "[/i]", 1),
-            ("U", "[u]", "[/u]", 1),
-            ("S", "[s]", "[/s]", 1),
-            ("Sub", "[sub]", "[/sub]", 3),
-            ("Sup", "[sup]", "[/sup]", 3),
+            ("B", "[b]", "[/b]"),
+            ("I", "[i]", "[/i]"),
+            ("U", "[u]", "[/u]"),
+            ("S", "[s]", "[/s]"),
+            ("Sub", "[sub]", "[/sub]"),
+            ("Sup", "[sup]", "[/sup]"),
         ]
-        for lbl, o_tag, c_tag, w_len in mini_style_buttons:
+        for lbl, o_tag, c_tag in mini_style_buttons:
             ttk.Button(
                 ribbon,
                 text=lbl,
                 style="RibbonMini.TButton",
-                width=w_len,
                 command=lambda ot=o_tag, ct=c_tag: self.apply_ngui_wrapper(ot, ct),
             ).pack(side="left", padx=1, pady=1)
 
