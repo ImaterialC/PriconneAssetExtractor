@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-title Misora: Unity3D Revision Tool ^& Story Editor
+title Misora Editor: Unity3D Revision Tool ^& Story Editor
 
 where py >nul 2>&1
 if not errorlevel 1 (

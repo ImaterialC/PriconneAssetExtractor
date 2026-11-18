@@ -885,7 +885,7 @@ class MisoraApp(tk.Tk):
 
     def __init__(self, initial_path: Optional[str] = None, _progress_callback=None):
         super().__init__()
-        self.title("Misora: Unity3D Revision Tool & Story Editor")
+        self.title("Misora Editor: Unity3D Revision Tool & Story Editor")
         self.geometry("1280x820")
         self.minsize(980, 620)
         self.withdraw()   # stay hidden until splash closes
@@ -4412,6 +4412,7 @@ class MisoraApp(tk.Tk):
             messagebox.showerror("File Error", f"Cannot find file: {file_path}")
             return
         self.last_opened_dir = file_path.parent
+        self.title(f"Misora Editor - {file_path.name}")
         if not hasattr(self, "recent_files"):
             self.recent_files = []
         if file_path in self.recent_files:
@@ -7795,24 +7796,21 @@ def main():
     the main MisoraApp window initializes. The splash fades out as soon as
     the editor is ready, so there is never a frozen black window on startup.
     """
-    initial_file = sys.argv[1] if len(sys.argv) > 1 else None
+    initial_file = None
+    show_splash = True
+    for arg in sys.argv[1:]:
+        if arg in ("--no-splash", "-ns"):
+            show_splash = False
+        elif not arg.startswith("-") and initial_file is None:
+            initial_file = arg
 
     # -- Show splash -------------------------------------------------------
-    _STEPS = [
-        (0.10, "Loading core modules…"),
-        (0.25, "Preparing theme engine…"),
-        (0.40, "Initializing undo journal…"),
-        (0.55, "Building UI layout…"),
-        (0.70, "Applying window styles…"),
-        (0.85, "Finalizing editor state…"),
-        (1.00, "Ready!"),
-    ]
-
-    try:
-        splash = MisoraSplashScreen()
-    except Exception:
-        # If splash fails (e.g. no display, no image), fall back silently
-        splash = None
+    splash = None
+    if show_splash:
+        try:
+            splash = MisoraSplashScreen()
+        except Exception:
+            splash = None
 
     def _report(progress: float, msg: str):
         if splash:
